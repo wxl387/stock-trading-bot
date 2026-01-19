@@ -1,0 +1,487 @@
+"""
+1D CNN model for stock price direction prediction.
+Much faster than LSTM on CPU while still capturing sequential patterns.
+"""
+import logging
+import json
+from pathlib import Path
+from typing import Optional, Dict, Tuple, Any
+import numpy as np
+
+# Configure TensorFlow device (MPS for M2)
+from src.ml.device_config import configure_tensorflow_device, log_device_info
+
+# Configure device before importing TensorFlow
+_DEVICE = configure_tensorflow_device()
+
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout, BatchNormalization
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.optimizers import Adam
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import optuna
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+from config.settings import MODELS_DIR
+from src.ml.sequence_utils import normalize_features, apply_normalization
+
+logger = logging.getLogger(__name__)
+
+
+class CNNModel:
+    """
+    1D CNN classifier for predicting stock price direction.
+    Faster than LSTM on CPU while capturing sequential patterns.
+    """
+
+    def __init__(
+        self,
+        sequence_length: int = 20,
+        n_features: int = 75,
+        filters: Tuple[int, int] = (32, 16),
+        kernel_size: int = 3,
+        dropout_rate: float = 0.2,
+        learning_rate: float = 0.001
+    ):
+        """
+        Initialize CNN model.
+
+        Args:
+            sequence_length: Number of time steps in each sequence.
+            n_features: Number of features per time step.
+            filters: Tuple of filter counts for each Conv1D layer.
+            kernel_size: Kernel size for Conv1D layers.
+            dropout_rate: Dropout rate for regularization.
+            learning_rate: Learning rate for Adam optimizer.
+        """
+        self.sequence_length = sequence_length
+        self.n_features = n_features
+        self.filters = filters
+        self.kernel_size = kernel_size
+        self.dropout_rate = dropout_rate
+        self.learning_rate = learning_rate
+
+        self.model: Optional[Sequential] = None
+        self.normalization_stats: Optional[Dict] = None
+        self.is_trained = False
+        self.history = None
+
+        logger.info(
+            f"Initialized CNNModel: seq_len={sequence_length}, "
+            f"features={n_features}, filters={filters}"
+        )
+
+    def build_model(self) -> Sequential:
+        """
+        Build the 1D CNN architecture.
+
+        Returns:
+            Compiled Keras Sequential model.
+        """
+        model = Sequential([
+            # First Conv1D layer
+            Conv1D(
+                self.filters[0],
+                kernel_size=self.kernel_size,
+                activation='relu',
+                input_shape=(self.sequence_length, self.n_features),
+                padding='same'
+            ),
+            BatchNormalization(),
+            MaxPooling1D(pool_size=2),
+            Dropout(self.dropout_rate),
+
+            # Second Conv1D layer
+            Conv1D(
+                self.filters[1],
+                kernel_size=self.kernel_size,
+                activation='relu',
+                padding='same'
+            ),
+            BatchNormalization(),
+            MaxPooling1D(pool_size=2),
+            Dropout(self.dropout_rate),
+
+            # Flatten and Dense layers
+            Flatten(),
+            Dense(32, activation='relu'),
+            Dropout(self.dropout_rate),
+
+            # Output layer
+            Dense(1, activation='sigmoid')
+        ])
+
+        model.compile(
+            optimizer=Adam(learning_rate=self.learning_rate),
+            loss='binary_crossentropy',
+            metrics=['accuracy']
+        )
+
+        logger.info(f"Built CNN model with {model.count_params():,} parameters (device: {_DEVICE})")
+
+        return model
+
+    def train(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        eval_set: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        epochs: int = 50,
+        batch_size: int = 32,
+        early_stopping_patience: int = 10
+    ) -> Dict[str, float]:
+        """
+        Train the CNN model.
+
+        Args:
+            X: Training sequences of shape (n_samples, sequence_length, n_features).
+            y: Training labels.
+            eval_set: Optional validation set (X_val, y_val).
+            epochs: Maximum training epochs.
+            batch_size: Batch size for training.
+            early_stopping_patience: Patience for early stopping.
+
+        Returns:
+            Dictionary with training metrics.
+        """
+        logger.info(f"Training CNN with {len(X)} sequences")
+
+        # Update n_features based on actual data
+        self.n_features = X.shape[2]
+        self.sequence_length = X.shape[1]
+
+        # Normalize data
+        if eval_set is not None:
+            X_val, y_val = eval_set
+            X, X_val, self.normalization_stats = normalize_features(X, X_val)
+            validation_data = (X_val, y_val)
+        else:
+            X, _, self.normalization_stats = normalize_features(X)
+            validation_data = None
+
+        # Build model
+        self.model = self.build_model()
+
+        # Callbacks
+        callbacks = [
+            EarlyStopping(
+                monitor='val_loss' if validation_data else 'loss',
+                patience=early_stopping_patience,
+                restore_best_weights=True,
+                verbose=1
+            ),
+            ReduceLROnPlateau(
+                monitor='val_loss' if validation_data else 'loss',
+                factor=0.5,
+                patience=5,
+                min_lr=1e-6,
+                verbose=1
+            )
+        ]
+
+        # Train
+        self.history = self.model.fit(
+            X, y,
+            validation_data=validation_data,
+            epochs=epochs,
+            batch_size=batch_size,
+            callbacks=callbacks,
+            verbose=0  # Silent - verbose output causes broken pipe on MPS GPU
+        )
+
+        self.is_trained = True
+
+        # Calculate training metrics
+        y_pred = (self.model.predict(X, verbose=0) > 0.5).astype(int).flatten()
+        metrics = self._calculate_metrics(y, y_pred)
+
+        logger.info(f"Training complete. Accuracy: {metrics['accuracy']:.4f}")
+
+        return metrics
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Make binary predictions.
+
+        Args:
+            X: Feature sequences.
+
+        Returns:
+            Array of predicted labels (0 or 1).
+        """
+        self._ensure_trained()
+
+        # Normalize input
+        if self.normalization_stats is not None:
+            X = apply_normalization(X, self.normalization_stats)
+
+        proba = self.model.predict(X, verbose=0)
+        return (proba > 0.5).astype(int).flatten()
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """
+        Get prediction probabilities.
+
+        Args:
+            X: Feature sequences.
+
+        Returns:
+            Array of shape (n_samples, 2) with [prob_class_0, prob_class_1].
+        """
+        self._ensure_trained()
+
+        # Normalize input
+        if self.normalization_stats is not None:
+            X = apply_normalization(X, self.normalization_stats)
+
+        prob_1 = self.model.predict(X, verbose=0).flatten()
+        prob_0 = 1 - prob_1
+
+        return np.column_stack([prob_0, prob_1])
+
+    def save(self, name: str = "cnn_model") -> Path:
+        """
+        Save model to disk.
+
+        Args:
+            name: Model name.
+
+        Returns:
+            Path to saved model directory.
+        """
+        self._ensure_trained()
+
+        MODELS_DIR.mkdir(exist_ok=True)
+        model_dir = MODELS_DIR / name
+        model_dir.mkdir(exist_ok=True)
+
+        # Save Keras model with .keras extension (required by Keras 3)
+        model_path = model_dir / "model.keras"
+        self.model.save(model_path)
+
+        # Save metadata and normalization stats
+        metadata = {
+            "model_type": "cnn",
+            "sequence_length": self.sequence_length,
+            "n_features": self.n_features,
+            "filters": list(self.filters),
+            "kernel_size": self.kernel_size,
+            "dropout_rate": self.dropout_rate,
+            "learning_rate": self.learning_rate,
+            "normalization_stats": {
+                "mean": self.normalization_stats["mean"].tolist(),
+                "std": self.normalization_stats["std"].tolist()
+            } if self.normalization_stats else None
+        }
+
+        with open(model_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        logger.info(f"Model saved to {model_dir}")
+        return model_dir
+
+    def load(self, name: str = "cnn_model") -> None:
+        """
+        Load model from disk.
+
+        Args:
+            name: Model name.
+        """
+        model_dir = MODELS_DIR / name
+
+        if not model_dir.exists():
+            raise FileNotFoundError(f"Model not found: {model_dir}")
+
+        # Load Keras model (check for .keras file first, then legacy format)
+        model_path = model_dir / "model.keras"
+        if model_path.exists():
+            self.model = keras.models.load_model(model_path)
+        else:
+            # Legacy format - directory or .h5
+            self.model = keras.models.load_model(model_dir)
+
+        # Load metadata
+        with open(model_dir / "metadata.json", "r") as f:
+            metadata = json.load(f)
+
+        self.sequence_length = metadata["sequence_length"]
+        self.n_features = metadata["n_features"]
+        self.filters = tuple(metadata["filters"])
+        self.kernel_size = metadata["kernel_size"]
+        self.dropout_rate = metadata["dropout_rate"]
+        self.learning_rate = metadata["learning_rate"]
+
+        if metadata["normalization_stats"]:
+            self.normalization_stats = {
+                "mean": np.array(metadata["normalization_stats"]["mean"]),
+                "std": np.array(metadata["normalization_stats"]["std"])
+            }
+
+        self.is_trained = True
+        logger.info(f"Model loaded from {model_dir}")
+
+    def tune(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        n_trials: int = 30,
+        n_splits: int = 3,
+        epochs_per_trial: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Tune hyperparameters using Optuna.
+
+        Args:
+            X: Feature sequences of shape (n_samples, sequence_length, n_features).
+            y: Target labels.
+            n_trials: Number of optimization trials.
+            n_splits: Number of CV splits for evaluation.
+            epochs_per_trial: Training epochs per trial (reduced for speed).
+
+        Returns:
+            Dictionary with best parameters and score.
+        """
+        logger.info(f"Starting CNN hyperparameter tuning with {n_trials} trials...")
+
+        # Store original dimensions
+        self.sequence_length = X.shape[1]
+        self.n_features = X.shape[2]
+
+        def objective(trial):
+            # Suggest hyperparameters
+            filters_1 = trial.suggest_categorical("filters_1", [16, 32, 64])
+            filters_2 = trial.suggest_categorical("filters_2", [8, 16, 32])
+            kernel_size = trial.suggest_categorical("kernel_size", [2, 3, 5])
+            dropout_rate = trial.suggest_float("dropout_rate", 0.1, 0.5)
+            learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
+            batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
+
+            # Time series cross-validation
+            fold_size = len(X) // (n_splits + 1)
+            scores = []
+
+            for fold in range(n_splits):
+                train_end = (fold + 2) * fold_size
+                val_start = train_end
+                val_end = min(val_start + fold_size, len(X))
+
+                if val_end <= val_start:
+                    break
+
+                X_train = X[:train_end]
+                y_train = y[:train_end]
+                X_val = X[val_start:val_end]
+                y_val = y[val_start:val_end]
+
+                # Normalize data
+                X_train_norm, X_val_norm, _ = normalize_features(X_train, X_val)
+
+                # Build model with trial parameters
+                model = Sequential([
+                    Conv1D(filters_1, kernel_size=kernel_size, activation='relu',
+                           input_shape=(self.sequence_length, self.n_features), padding='same'),
+                    BatchNormalization(),
+                    MaxPooling1D(pool_size=2),
+                    Dropout(dropout_rate),
+                    Conv1D(filters_2, kernel_size=kernel_size, activation='relu', padding='same'),
+                    BatchNormalization(),
+                    MaxPooling1D(pool_size=2),
+                    Dropout(dropout_rate),
+                    Flatten(),
+                    Dense(32, activation='relu'),
+                    Dropout(dropout_rate),
+                    Dense(1, activation='sigmoid')
+                ])
+
+                model.compile(
+                    optimizer=Adam(learning_rate=learning_rate),
+                    loss='binary_crossentropy',
+                    metrics=['accuracy']
+                )
+
+                # Train with early stopping
+                early_stop = EarlyStopping(
+                    monitor='val_loss',
+                    patience=5,
+                    restore_best_weights=True,
+                    verbose=0
+                )
+
+                model.fit(
+                    X_train_norm, y_train,
+                    validation_data=(X_val_norm, y_val),
+                    epochs=epochs_per_trial,
+                    batch_size=batch_size,
+                    callbacks=[early_stop],
+                    verbose=0
+                )
+
+                # Evaluate
+                y_pred = (model.predict(X_val_norm, verbose=0) > 0.5).astype(int).flatten()
+                scores.append(accuracy_score(y_val, y_pred))
+
+                # Clear session to prevent memory buildup
+                keras.backend.clear_session()
+
+            return np.mean(scores) if scores else 0.0
+
+        # Create study and optimize
+        study = optuna.create_study(direction="maximize")
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+        # Get best parameters
+        best_params = study.best_params
+        best_filters = (best_params["filters_1"], best_params["filters_2"])
+
+        logger.info(f"Best CV accuracy: {study.best_value:.4f}")
+        logger.info(f"Best parameters: filters={best_filters}, "
+                   f"kernel_size={best_params['kernel_size']}, "
+                   f"dropout={best_params['dropout_rate']:.3f}, "
+                   f"lr={best_params['learning_rate']:.6f}")
+
+        # Update model parameters
+        self.filters = best_filters
+        self.kernel_size = best_params["kernel_size"]
+        self.dropout_rate = best_params["dropout_rate"]
+        self.learning_rate = best_params["learning_rate"]
+
+        return {
+            "best_params": {
+                "filters": best_filters,
+                "kernel_size": best_params["kernel_size"],
+                "dropout_rate": best_params["dropout_rate"],
+                "learning_rate": best_params["learning_rate"],
+                "batch_size": best_params["batch_size"]
+            },
+            "best_score": study.best_value,
+            "n_trials": n_trials
+        }
+
+    def get_model_summary(self) -> str:
+        """Get model architecture summary."""
+        if self.model is None:
+            self.model = self.build_model()
+
+        summary_lines = []
+        self.model.summary(print_fn=lambda x: summary_lines.append(x))
+        return "\n".join(summary_lines)
+
+    def _calculate_metrics(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray
+    ) -> Dict[str, float]:
+        """Calculate classification metrics."""
+        return {
+            "accuracy": accuracy_score(y_true, y_pred),
+            "precision": precision_score(y_true, y_pred, zero_division=0),
+            "recall": recall_score(y_true, y_pred, zero_division=0),
+            "f1": f1_score(y_true, y_pred, zero_division=0)
+        }
+
+    def _ensure_trained(self) -> None:
+        """Ensure model is trained before prediction."""
+        if not self.is_trained or self.model is None:
+            raise RuntimeError("Model not trained. Call train() first.")

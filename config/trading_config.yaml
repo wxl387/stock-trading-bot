@@ -1,0 +1,174 @@
+# Trading Bot Configuration
+
+trading:
+  mode: "paper"  # paper or live
+  symbols:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - NVDA
+    - META
+    - TSLA
+
+  # Market hours (Eastern Time)
+  market_open: "09:30"
+  market_close: "16:00"
+
+  # Trading frequency
+  check_interval_seconds: 60
+
+risk_management:
+  # Position limits
+  max_position_pct: 0.10          # 10% max per position
+  max_positions: 20               # Maximum number of positions
+
+  # Daily limits
+  max_daily_loss_pct: 0.05        # 5% daily loss limit
+  max_daily_trades: 50            # Maximum trades per day
+  pause_after_consecutive_losses: 3
+
+  # Exposure limits
+  max_total_exposure: 0.80        # 80% max invested
+  max_sector_exposure: 0.30       # 30% max per sector
+
+  # Stop loss settings
+  stop_loss:
+    default_type: "atr"           # fixed, atr, or trailing
+    fixed_pct: 0.05               # 5% for fixed stops
+    atr_multiplier: 2.0           # 2x ATR for ATR-based stops
+    trailing_pct: 0.03            # 3% trailing stop
+
+  # Take profit settings (with multiple levels for partial exits)
+  take_profit:
+    enabled: true
+    levels:                        # Multiple TP levels: [target_pct, exit_pct]
+      - [0.05, 0.33]              # TP1: 5% gain, sell 33% of position
+      - [0.10, 0.50]              # TP2: 10% gain, sell 50% of remaining
+      - [0.15, 1.0]               # TP3: 15% gain, sell everything left
+
+  # VIX-based position sizing
+  volatility_sizing:
+    enabled: true
+    vix_thresholds:
+      low: 15                     # VIX < 15: calm market
+      normal: 25                  # VIX 15-25: normal volatility
+      high: 35                    # VIX 25-35: high volatility
+      extreme: 50                 # VIX > 35: extreme volatility
+    size_multipliers:
+      low: 1.2                    # Increase size in calm markets
+      normal: 1.0                 # Normal sizing
+      high: 0.7                   # Reduce size in high vol
+      extreme: 0.5                # Half size in extreme vol
+
+  # Max drawdown protection
+  drawdown_protection:
+    enabled: true
+    max_drawdown_pct: 0.10        # 10% max portfolio drawdown
+    recovery_threshold: 0.95      # Exit recovery at 95% of peak
+    recovery_size_multiplier: 0.5 # 50% position size in recovery mode
+
+  # Market regime detection
+  regime_detection:
+    enabled: true
+    vix_volatile_threshold: 30    # VIX level for volatile regime
+    adx_trend_threshold: 25       # ADX level for trending market
+    adx_choppy_threshold: 20      # ADX level below which market is choppy
+    cache_hours: 4                # Hours to cache regime detection
+    regime_parameters:
+      bull:
+        stop_loss_pct: 0.05
+        position_size_multiplier: 1.0
+        min_confidence: 0.55
+      bear:
+        stop_loss_pct: 0.03
+        position_size_multiplier: 0.7
+        min_confidence: 0.60
+      choppy:
+        stop_loss_pct: 0.02
+        position_size_multiplier: 0.5
+        min_confidence: 0.70
+      volatile:
+        stop_loss_pct: 0.08
+        position_size_multiplier: 0.5
+        min_confidence: 0.65
+
+ml_model:
+  # Model selection
+  primary_model: "xgboost"        # xgboost, lstm, cnn, or ensemble
+
+  # Prediction settings
+  prediction_horizon: 5           # Days ahead to predict
+  confidence_threshold: 0.6       # Minimum confidence to trade
+  min_confidence_sell: 0.55       # Minimum confidence for SELL signal
+
+  # Training settings
+  train_window_days: 252          # 1 year of training data
+  retrain_frequency_days: 30      # Retrain every 30 days
+  sequence_length: 20             # Sequence length for LSTM/CNN
+
+  # Ensemble settings (if primary_model is "ensemble")
+  ensemble:
+    voting_method: "soft"         # hard, soft, or weighted
+    weights:
+      xgboost: 1.0                # XGBoost weight
+      lstm: 0.8                   # LSTM weight
+      cnn: 0.8                    # CNN weight
+    models:
+      xgboost: "trading_model"
+      lstm: "lstm_trading_model"
+      cnn: "cnn_trading_model"
+
+  # Feature settings
+  technical_indicators:
+    - sma_20
+    - sma_50
+    - ema_12
+    - ema_26
+    - rsi_14
+    - macd
+    - macd_signal
+    - bollinger_upper
+    - bollinger_lower
+    - atr_14
+    - obv
+    - vwap
+
+backtesting:
+  initial_capital: 100000
+  commission: 0.0                 # WeBull is commission-free
+  slippage_pct: 0.001            # 0.1% slippage assumption
+
+  # Walk-forward settings
+  train_period_days: 252          # 1 year training
+  test_period_days: 63            # 3 months testing
+  step_days: 21                   # 1 month step
+
+notifications:
+  enabled: true
+  channels:
+    - telegram
+    - discord
+
+  # Event types to notify
+  notify_on:
+    trade_executed: true
+    stop_loss_triggered: true
+    take_profit_triggered: true
+    daily_summary: true
+    risk_warning: true
+    system_error: true
+
+dashboard:
+  port: 8501
+  refresh_interval_seconds: 30
+  theme: "dark"
+
+retraining:
+  enabled: true
+  schedule: "daily"               # weekly, daily, or monthly
+  day_of_week: "sun"              # For weekly: mon, tue, wed, thu, fri, sat, sun
+  hour: 2                         # Hour to run (0-23, in local time)
+  auto_deploy: true               # Auto-deploy if model improves
+  min_improvement: 0.01           # Minimum accuracy improvement (1%) to deploy
+  notify_on_complete: true        # Log results when complete

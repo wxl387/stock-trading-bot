@@ -1,0 +1,562 @@
+"""
+Main trading engine that orchestrates all components.
+"""
+import logging
+import time
+from datetime import datetime, time as dt_time
+from typing import List, Dict, Optional
+import schedule
+
+from config.settings import settings, Settings
+from src.broker.base_broker import BaseBroker, OrderSide, OrderType
+from src.broker.simulated_broker import SimulatedBroker
+from src.strategy.ml_strategy import MLStrategy, SignalType
+from src.risk.risk_manager import RiskManager, StopLossType
+from src.risk.regime_detector import RegimeDetector, get_regime_detector, MarketRegime
+from src.ml.scheduled_retrainer import ScheduledRetrainer, get_scheduled_retrainer
+from src.notifications.notifier_manager import NotifierManager, get_notifier
+
+# Optional import for WebullBroker (requires webull package)
+try:
+    from src.broker.webull_broker import WebullBroker
+    WEBULL_AVAILABLE = True
+except ImportError:
+    WebullBroker = None
+    WEBULL_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+
+class TradingEngine:
+    """
+    Main trading engine that orchestrates broker, strategy, and risk management.
+    """
+
+    def __init__(
+        self,
+        symbols: List[str],
+        paper_trading: bool = True,
+        simulated: bool = False,
+        initial_capital: float = 100000.0,
+        ignore_market_hours: bool = False,
+        use_ensemble: bool = False
+    ):
+        """
+        Initialize TradingEngine.
+
+        Args:
+            symbols: List of stock symbols to trade.
+            paper_trading: Whether to use paper trading mode (WeBull).
+            simulated: Whether to use simulated broker (no credentials needed).
+            initial_capital: Initial capital for simulated broker.
+            ignore_market_hours: Whether to ignore market hours check (for testing).
+            use_ensemble: Whether to use ensemble model (XGBoost + LSTM + CNN).
+        """
+        self.symbols = symbols
+        self.paper_trading = paper_trading
+        self.simulated = simulated
+        self.initial_capital = initial_capital
+        self.ignore_market_hours = ignore_market_hours
+        self.use_ensemble = use_ensemble
+        self.is_running = False
+
+        # Load config
+        self.config = Settings.load_trading_config()
+
+        # Initialize components
+        self.broker: Optional[BaseBroker] = None
+        self.strategy = MLStrategy()
+        self.risk_manager = RiskManager(
+            max_position_pct=self.config.get("risk_management", {}).get("max_position_pct", 0.10),
+            max_daily_loss_pct=self.config.get("risk_management", {}).get("max_daily_loss_pct", 0.05),
+            max_total_exposure=self.config.get("risk_management", {}).get("max_total_exposure", 0.80)
+        )
+
+        # Market hours (Eastern Time)
+        self.market_open = dt_time(9, 30)
+        self.market_close = dt_time(16, 0)
+
+        # Initialize scheduled retrainer
+        self.retrainer: Optional[ScheduledRetrainer] = None
+        retraining_config = self.config.get("retraining", {})
+        if retraining_config.get("enabled", False):
+            self.retrainer = get_scheduled_retrainer(self.config)
+            logger.info("Scheduled retraining enabled")
+
+        # Initialize notifier
+        self.notifier: Optional[NotifierManager] = None
+        if self.config.get("notifications", {}).get("enabled", False):
+            self.notifier = get_notifier()
+            logger.info("Notifications enabled")
+
+        # Initialize regime detector
+        self.regime_detector: Optional[RegimeDetector] = None
+        if self.config.get("risk_management", {}).get("regime_detection", {}).get("enabled", True):
+            self.regime_detector = get_regime_detector()
+            logger.info("Market regime detection enabled")
+
+        logger.info(f"Trading Engine initialized with {len(symbols)} symbols")
+        if simulated:
+            logger.info(f"Mode: SIMULATED (offline, ${initial_capital:,.2f} capital)")
+        else:
+            logger.info(f"Mode: {'Paper Trading' if paper_trading else 'LIVE TRADING'}")
+
+    def start(self) -> None:
+        """Start the trading engine."""
+        logger.info("Starting Trading Engine...")
+
+        # Initialize broker based on mode
+        if self.simulated:
+            self.broker = SimulatedBroker(initial_capital=self.initial_capital)
+        else:
+            if not WEBULL_AVAILABLE:
+                logger.error("WebullBroker not available. Install 'webull' package or use --simulated mode.")
+                raise ImportError("webull package not installed. Use --simulated mode instead.")
+            self.broker = WebullBroker(paper_trading=self.paper_trading)
+
+        # Connect to broker
+        if not self.broker.connect():
+            logger.error("Failed to connect to broker")
+            raise ConnectionError("Broker connection failed")
+
+        # Load ML model
+        try:
+            if self.use_ensemble:
+                loaded = self.strategy.load_ensemble(
+                    xgboost_name="trading_model",
+                    lstm_name="lstm_trading_model",
+                    cnn_name="cnn_trading_model"
+                )
+                logger.info(f"Loaded ensemble with models: {loaded}")
+            else:
+                self.strategy.load_model("trading_model")
+        except FileNotFoundError:
+            logger.warning("No trained model found. Please train a model first.")
+
+        # Reset daily limits
+        account = self.broker.get_account_info()
+        self.risk_manager.reset_daily_limits(account.portfolio_value)
+
+        self.is_running = True
+
+        # Start scheduled retrainer if enabled
+        if self.retrainer:
+            self.retrainer.start()
+            status = self.retrainer.get_status()
+            logger.info(f"Scheduled retraining active. Next run: {status.get('next_run', 'N/A')}")
+
+        logger.info("Trading Engine started successfully")
+
+        # Send startup notification
+        if self.notifier:
+            mode = "simulated" if self.simulated else ("paper" if self.paper_trading else "live")
+            model_type = "ensemble" if self.use_ensemble else "xgboost"
+            self.notifier.notify_startup(
+                mode=mode,
+                symbols=self.symbols,
+                model_type=model_type
+            )
+
+    def stop(self) -> None:
+        """Stop the trading engine."""
+        logger.info("Stopping Trading Engine...")
+        self.is_running = False
+
+        # Stop scheduled retrainer
+        if self.retrainer:
+            self.retrainer.stop()
+
+        if self.broker:
+            self.broker.disconnect()
+
+        # Send shutdown notification
+        if self.notifier:
+            self.notifier.notify_shutdown(reason="Trading engine stopped")
+
+        logger.info("Trading Engine stopped")
+
+    def run_trading_cycle(self) -> Dict:
+        """
+        Run a single trading cycle.
+
+        Returns:
+            Dictionary with cycle results.
+        """
+        if not self.is_running:
+            return {"status": "not_running"}
+
+        if not self._is_market_open():
+            return {"status": "market_closed"}
+
+        cycle_results = {
+            "timestamp": datetime.now(),
+            "signals": {},
+            "trades": [],
+            "errors": []
+        }
+
+        try:
+            # Get current account state
+            account = self.broker.get_account_info()
+            positions = self.broker.get_positions()
+            current_positions = {p.symbol: p.quantity for p in positions}
+
+            # Check if trading is allowed
+            risk_check = self.risk_manager.check_can_trade()
+            if not risk_check.approved:
+                logger.warning(f"Trading blocked: {risk_check.reason}")
+                cycle_results["status"] = "blocked"
+                cycle_results["block_reason"] = risk_check.reason
+                return cycle_results
+
+            # Check drawdown protection
+            drawdown_check = self.risk_manager.check_drawdown(account.portfolio_value)
+            if not drawdown_check.approved:
+                logger.warning(f"Trading blocked by drawdown: {drawdown_check.reason}")
+                cycle_results["status"] = "blocked"
+                cycle_results["block_reason"] = drawdown_check.reason
+
+                # Send risk warning notification
+                if self.notifier:
+                    self.notifier.notify_risk_warning(
+                        warning_type="Max Drawdown Breached",
+                        details=drawdown_check.reason
+                    )
+                return cycle_results
+
+            # Detect current market regime
+            current_regime = None
+            if self.regime_detector:
+                current_regime = self.regime_detector.detect_regime()
+                cycle_results["regime"] = current_regime.value
+
+            # Get current prices and check stop losses
+            quotes = self.broker.get_quotes(list(current_positions.keys()))
+            current_prices = {s: q.last for s, q in quotes.items()}
+
+            # Check stop losses
+            triggered_stops = self.risk_manager.check_stop_losses(current_prices)
+            for symbol in triggered_stops:
+                self._execute_stop_loss(symbol)
+                cycle_results["trades"].append({
+                    "type": "STOP_LOSS",
+                    "symbol": symbol
+                })
+
+            # Check take-profits
+            triggered_tps = self.risk_manager.check_take_profits(current_prices)
+            for symbol, quantity, target_price in triggered_tps:
+                self._execute_take_profit(symbol, quantity, target_price)
+                cycle_results["trades"].append({
+                    "type": "TAKE_PROFIT",
+                    "symbol": symbol,
+                    "quantity": quantity,
+                    "target_price": target_price
+                })
+
+            # Update trailing stops
+            for symbol in current_positions:
+                if symbol in current_prices:
+                    self.risk_manager.update_trailing_stop(symbol, current_prices[symbol])
+
+            # Generate trading signals
+            recommendations = self.strategy.get_trade_recommendations(
+                symbols=self.symbols,
+                portfolio_value=account.portfolio_value,
+                current_positions=current_positions,
+                risk_manager=self.risk_manager
+            )
+
+            # Execute trades
+            for rec in recommendations:
+                try:
+                    trade_result = self._execute_trade(rec, account.portfolio_value, current_positions)
+                    if trade_result:
+                        cycle_results["trades"].append(trade_result)
+                except Exception as e:
+                    logger.error(f"Trade execution error: {e}")
+                    cycle_results["errors"].append(str(e))
+
+            cycle_results["status"] = "success"
+
+        except Exception as e:
+            logger.error(f"Trading cycle error: {e}")
+            cycle_results["status"] = "error"
+            cycle_results["errors"].append(str(e))
+
+            # Send error notification
+            if self.notifier:
+                self.notifier.notify_error(
+                    error=f"Trading cycle error: {str(e)}"
+                )
+
+        return cycle_results
+
+    def _execute_trade(
+        self,
+        recommendation: Dict,
+        portfolio_value: float,
+        current_positions: Dict[str, int]
+    ) -> Optional[Dict]:
+        """
+        Execute a trade recommendation.
+
+        Args:
+            recommendation: Trade recommendation dict.
+            portfolio_value: Current portfolio value.
+            current_positions: Current positions.
+
+        Returns:
+            Trade result dict or None.
+        """
+        symbol = recommendation["symbol"]
+        action = recommendation["action"]
+        shares = recommendation["shares"]
+        price = recommendation["price"]
+
+        # Risk check for buys
+        if action == "BUY":
+            risk_check = self.risk_manager.check_position(
+                symbol=symbol,
+                quantity=shares,
+                price=price,
+                portfolio_value=portfolio_value,
+                current_positions={s: shares * price for s, shares in current_positions.items()}
+            )
+
+            if not risk_check.approved:
+                logger.warning(f"Trade rejected by risk manager: {risk_check.reason}")
+                if risk_check.adjusted_quantity and risk_check.adjusted_quantity > 0:
+                    shares = risk_check.adjusted_quantity
+                    logger.info(f"Adjusted quantity to {shares} shares")
+                else:
+                    return None
+
+        # Execute order
+        side = OrderSide.BUY if action == "BUY" else OrderSide.SELL
+
+        order = self.broker.place_order(
+            symbol=symbol,
+            side=side,
+            quantity=shares,
+            order_type=OrderType.MARKET
+        )
+
+        logger.info(f"Executed {action} order for {shares} {symbol}")
+
+        # Send trade notification
+        if self.notifier:
+            confidence = recommendation.get("confidence")
+            self.notifier.notify_trade(
+                action=action,
+                symbol=symbol,
+                shares=shares,
+                price=price,
+                confidence=confidence
+            )
+
+        # Set stop loss for new positions
+        if action == "BUY" and "stop_loss" in recommendation:
+            self.risk_manager.set_stop_loss(
+                symbol=symbol,
+                entry_price=price,
+                stop_type=StopLossType.TRAILING,
+                stop_price=recommendation["stop_loss"]
+            )
+
+        # Set take-profit for new positions
+        if action == "BUY":
+            tp_config = self.config.get("risk_management", {}).get("take_profit", {})
+            if tp_config.get("enabled", True):
+                tp_levels = tp_config.get("levels", [(0.05, 0.33), (0.10, 0.50), (0.15, 1.0)])
+                self.risk_manager.set_take_profit(
+                    symbol=symbol,
+                    entry_price=price,
+                    quantity=shares,
+                    tp_levels=tp_levels
+                )
+
+        return {
+            "order_id": order.order_id,
+            "action": action,
+            "symbol": symbol,
+            "shares": shares,
+            "price": price,
+            "timestamp": datetime.now()
+        }
+
+    def _execute_stop_loss(self, symbol: str) -> None:
+        """Execute stop loss for a position."""
+        position = self.broker.get_position(symbol)
+        if position and position.quantity > 0:
+            self.broker.sell(symbol, position.quantity)
+            self.risk_manager.remove_stop_loss(symbol)
+            self.risk_manager.remove_take_profit(symbol)
+
+            # Update P&L
+            pnl = position.unrealized_pnl
+            self.risk_manager.update_pnl(pnl, is_loss=(pnl < 0))
+
+            logger.warning(f"Stop loss executed for {symbol}. P&L: ${pnl:.2f}")
+
+            # Send stop-loss notification
+            if self.notifier:
+                exit_price = position.current_price if hasattr(position, 'current_price') else position.avg_cost
+                loss_pct = (pnl / (position.quantity * position.avg_cost)) if position.avg_cost > 0 else 0
+                self.notifier.notify_stop_loss(
+                    symbol=symbol,
+                    exit_price=exit_price,
+                    loss_amount=pnl,
+                    loss_pct=loss_pct
+                )
+
+    def _execute_take_profit(self, symbol: str, quantity: int, target_price: float) -> None:
+        """Execute take-profit partial sale."""
+        position = self.broker.get_position(symbol)
+        if not position or position.quantity <= 0:
+            return
+
+        # Ensure we don't sell more than we have
+        sell_qty = min(quantity, position.quantity)
+        if sell_qty <= 0:
+            return
+
+        self.broker.sell(symbol, sell_qty)
+
+        # Calculate P&L for partial sale
+        entry_price = position.avg_cost
+        pnl = (target_price - entry_price) * sell_qty
+        self.risk_manager.update_pnl(pnl, is_loss=False)
+
+        logger.info(f"Take-profit executed for {symbol}: sold {sell_qty} shares. P&L: ${pnl:.2f}")
+
+        # Send take-profit notification
+        if self.notifier:
+            gain_pct = (target_price - entry_price) / entry_price if entry_price > 0 else 0
+            self.notifier.notify_take_profit(
+                symbol=symbol,
+                exit_price=target_price,
+                quantity=sell_qty,
+                gain_amount=pnl,
+                gain_pct=gain_pct
+            )
+
+        # Remove stop-loss if fully exited
+        if position.quantity - sell_qty <= 0:
+            self.risk_manager.remove_stop_loss(symbol)
+
+    def _is_market_open(self) -> bool:
+        """Check if market is currently open."""
+        if self.ignore_market_hours:
+            return True
+
+        now = datetime.now()
+
+        # Check if weekday
+        if now.weekday() >= 5:  # Saturday or Sunday
+            return False
+
+        # Check market hours
+        current_time = now.time()
+        return self.market_open <= current_time <= self.market_close
+
+    def get_status(self) -> Dict:
+        """
+        Get current engine status.
+
+        Returns:
+            Status dictionary.
+        """
+        status = {
+            "is_running": self.is_running,
+            "mode": "paper" if self.paper_trading else "live",
+            "market_open": self._is_market_open(),
+            "symbols": self.symbols
+        }
+
+        if self.broker and self.broker.is_connected():
+            try:
+                account = self.broker.get_account_info()
+                positions = self.broker.get_positions()
+
+                status["account"] = {
+                    "portfolio_value": account.portfolio_value,
+                    "cash": account.cash,
+                    "buying_power": account.buying_power,
+                    "positions_count": len(positions)
+                }
+
+                status["risk"] = self.risk_manager.get_risk_summary(account.portfolio_value)
+
+            except Exception as e:
+                status["error"] = str(e)
+
+        # Add retraining status
+        if self.retrainer:
+            status["retraining"] = self.retrainer.get_status()
+
+        # Add regime detection status
+        if self.regime_detector:
+            status["regime"] = self.regime_detector.get_status()
+
+        return status
+
+    def get_retraining_status(self) -> Optional[Dict]:
+        """Get scheduled retraining status."""
+        if self.retrainer:
+            return self.retrainer.get_status()
+        return None
+
+    def trigger_retrain(self) -> Optional[Dict]:
+        """Manually trigger model retraining."""
+        if self.retrainer:
+            return self.retrainer.trigger_retrain_now()
+        return None
+
+
+def run_bot(
+    symbols: List[str],
+    paper_trading: bool = True,
+    simulated: bool = False,
+    initial_capital: float = 100000.0,
+    interval_seconds: int = 60,
+    ignore_market_hours: bool = False,
+    use_ensemble: bool = False
+):
+    """
+    Run the trading bot.
+
+    Args:
+        symbols: List of stock symbols to trade.
+        paper_trading: Whether to use paper trading (WeBull).
+        simulated: Whether to use simulated broker (no credentials).
+        initial_capital: Initial capital for simulated mode.
+        interval_seconds: Seconds between trading cycles.
+        ignore_market_hours: Whether to ignore market hours (for testing).
+        use_ensemble: Whether to use ensemble model (XGBoost + LSTM + CNN).
+    """
+    engine = TradingEngine(
+        symbols=symbols,
+        paper_trading=paper_trading,
+        simulated=simulated,
+        initial_capital=initial_capital,
+        ignore_market_hours=ignore_market_hours,
+        use_ensemble=use_ensemble
+    )
+
+    try:
+        engine.start()
+
+        logger.info(f"Bot running. Checking every {interval_seconds} seconds.")
+
+        while engine.is_running:
+            result = engine.run_trading_cycle()
+            logger.debug(f"Cycle result: {result['status']}")
+
+            time.sleep(interval_seconds)
+
+    except KeyboardInterrupt:
+        logger.info("Received shutdown signal")
+
+    finally:
+        engine.stop()
