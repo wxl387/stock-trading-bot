@@ -296,6 +296,31 @@ class RegimeDetector:
         """Get all regime parameters."""
         return self._regime_params.copy()
 
+    def _calculate_adx_series(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """Calculate ADX as a rolling series (vectorized for batch pre-computation)."""
+        high = df['high']
+        low = df['low']
+        close = df['close']
+
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        plus_dm = high.diff()
+        minus_dm = -low.diff()
+        plus_dm = plus_dm.clip(lower=0)
+        minus_dm = minus_dm.clip(lower=0)
+
+        atr = tr.rolling(window=period).mean()
+        plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
+        minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
+
+        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        adx_series = dx.rolling(window=period).mean()
+
+        return adx_series.fillna(0)
+
     def get_status(self) -> Dict:
         """Get current detector status."""
         return {
@@ -323,3 +348,51 @@ def get_regime_detector() -> RegimeDetector:
     if _regime_detector is None:
         _regime_detector = RegimeDetector()
     return _regime_detector
+
+
+def compute_regime_series(
+    spy_data: pd.DataFrame,
+    detector: Optional[RegimeDetector] = None,
+    vix_proxy_threshold: float = 25.0
+) -> pd.Series:
+    """
+    Pre-compute market regime for each trading day (vectorized, point-in-time).
+
+    Uses SPY data to determine market regime without look-ahead bias.
+    VIX proxy: 20-day annualized volatility * 100.
+
+    Args:
+        spy_data: DataFrame with 'close', 'high', 'low' columns.
+        detector: Optional RegimeDetector instance.
+        vix_proxy_threshold: Annualized vol % above which = VOLATILE.
+
+    Returns:
+        pd.Series with MarketRegime values, indexed by date.
+    """
+    if detector is None:
+        detector = RegimeDetector()
+
+    close = spy_data['close']
+
+    # Pre-compute all indicators as rolling series (vectorized)
+    vix_proxy = close.pct_change().rolling(20).std() * np.sqrt(252) * 100
+    sma_50 = close.rolling(50).mean()
+    sma_200 = close.rolling(200).mean()
+    adx_series = detector._calculate_adx_series(spy_data)
+
+    # Vectorized classification (apply rules in priority order)
+    # Default: BULL where SMA50 > SMA200, BEAR otherwise
+    regimes = pd.Series(MarketRegime.BULL, index=spy_data.index)
+    regimes[sma_50 < sma_200] = MarketRegime.BEAR
+
+    # ADX < 20 -> CHOPPY (overrides BULL/BEAR)
+    regimes[adx_series < detector.adx_choppy_threshold] = MarketRegime.CHOPPY
+
+    # VIX proxy > threshold -> VOLATILE (highest priority)
+    regimes[vix_proxy > vix_proxy_threshold] = MarketRegime.VOLATILE
+
+    # First 199 days: not enough data for SMA200, default to BULL
+    regimes.iloc[:199] = MarketRegime.BULL
+
+    regimes.name = 'regime'
+    return regimes

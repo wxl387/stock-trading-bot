@@ -857,7 +857,9 @@ class Backtester:
         max_positions: int = 5,
         use_ensemble: bool = True,
         model_params: Optional[Dict] = None,
-        optimized_params_path: Optional[str] = None
+        optimized_params_path: Optional[str] = None,
+        use_regime: bool = False,
+        regime_mode: str = "adjust"
     ) -> BacktestResult:
         """
         Walk-forward ML backtest with model retraining at each step.
@@ -926,6 +928,25 @@ class Backtester:
 
         if not all_data:
             raise ValueError("No valid data for walk-forward backtest")
+
+        # Pre-compute regime series if enabled
+        regime_series = None
+        if use_regime:
+            from src.risk.regime_detector import compute_regime_series
+            try:
+                spy_data = self.data_fetcher.fetch_historical("SPY", period="5y")
+                if not spy_data.empty and len(spy_data) >= 200:
+                    if spy_data.index.tz is not None:
+                        spy_data.index = spy_data.index.tz_localize(None)
+                    regime_series = compute_regime_series(spy_data)
+                    regime_counts = regime_series.value_counts()
+                    logger.info(f"Regime series computed: {len(regime_series)} days")
+                    for regime, count in regime_counts.items():
+                        logger.info(f"  {regime.value.upper()}: {count} days ({count/len(regime_series)*100:.1f}%)")
+                else:
+                    logger.warning("Insufficient SPY data for regime detection")
+            except Exception as e:
+                logger.warning(f"Regime detection failed: {e}. Running without regime.")
 
         # Find common date range
         common_dates = None
@@ -1090,7 +1111,8 @@ class Backtester:
             # Simulate portfolio on this test window
             signals_df = pd.DataFrame(test_signals)
             window_result = self._simulate_portfolio_window(
-                signals_df, test_prices, confidence_threshold, max_positions, capital
+                signals_df, test_prices, confidence_threshold, max_positions, capital,
+                regime_series=regime_series, regime_mode=regime_mode
             )
 
             capital = window_result.final_value
@@ -1175,15 +1197,37 @@ class Backtester:
         logger.info(f"Walk-forward complete: {window_count} windows, {total_return:.2%} total return")
         return result
 
+    def _lookup_regime(self, regime_series, date):
+        """Look up regime for a given date, handling index mismatches."""
+        from src.risk.regime_detector import MarketRegime
+        # Normalize timezone
+        lookup_date = date
+        if hasattr(lookup_date, 'tz') and lookup_date.tz is not None:
+            lookup_date = lookup_date.tz_localize(None)
+
+        if lookup_date in regime_series.index:
+            return regime_series.loc[lookup_date]
+
+        # Find nearest previous date
+        valid_dates = regime_series.index[regime_series.index <= lookup_date]
+        if len(valid_dates) > 0:
+            return regime_series.loc[valid_dates[-1]]
+
+        return MarketRegime.BULL
+
     def _simulate_portfolio_window(
         self,
         signals_df: pd.DataFrame,
         prices: Dict[str, pd.Series],
         confidence_threshold: float,
         max_positions: int,
-        starting_capital: float
+        starting_capital: float,
+        regime_series: Optional[pd.Series] = None,
+        regime_mode: str = "adjust"
     ) -> BacktestResult:
         """Simulate portfolio trading for a single window with custom starting capital."""
+        from src.risk.regime_detector import MarketRegime, DEFAULT_REGIME_PARAMS
+
         capital = starting_capital
         positions = {}
         trades = []
@@ -1191,6 +1235,24 @@ class Backtester:
 
         for date in sorted(signals_df["date"].unique()):
             day_signals = signals_df[signals_df["date"] == date]
+
+            # Regime-adaptive parameters
+            day_confidence = confidence_threshold
+            day_size_mult = 1.0
+
+            if regime_series is not None:
+                regime = self._lookup_regime(regime_series, date)
+                regime_params = DEFAULT_REGIME_PARAMS[regime]
+
+                if regime_mode == "filter":
+                    if regime in (MarketRegime.BEAR, MarketRegime.CHOPPY):
+                        day_confidence = 0.99  # Block entries
+                    else:
+                        day_confidence = max(confidence_threshold, regime_params.min_confidence)
+                else:
+                    day_confidence = max(confidence_threshold, regime_params.min_confidence)
+
+                day_size_mult = regime_params.position_size_multiplier
 
             # Current equity
             equity = capital
@@ -1205,7 +1267,7 @@ class Backtester:
                 if not sym_signal.empty:
                     prob = sym_signal.iloc[0]["prob_up"]
                     price = sym_signal.iloc[0]["price"]
-                    if prob < (1 - confidence_threshold):
+                    if prob < (1 - day_confidence):
                         pos = positions.pop(sym)
                         proceeds = pos["shares"] * price * (1 - self.commission - self.slippage)
                         capital += proceeds
@@ -1222,14 +1284,15 @@ class Backtester:
 
             # Entries
             if len(positions) < max_positions:
-                candidates = day_signals[day_signals["prob_up"] > confidence_threshold]
+                candidates = day_signals[day_signals["prob_up"] > day_confidence]
                 candidates = candidates[~candidates["symbol"].isin(positions.keys())]
                 candidates = candidates.sort_values("prob_up", ascending=False)
 
                 for _, row in candidates.iterrows():
                     if len(positions) >= max_positions:
                         break
-                    position_value = capital / (max_positions - len(positions) + 1) * 0.95
+                    base_value = capital / (max_positions - len(positions) + 1) * 0.95
+                    position_value = base_value * day_size_mult
                     shares = int(position_value / row["price"])
                     if shares > 0:
                         cost = shares * row["price"] * (1 + self.commission + self.slippage)

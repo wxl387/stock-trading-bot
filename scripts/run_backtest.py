@@ -42,6 +42,11 @@ def main():
                         help="Skip generating equity curve chart")
     parser.add_argument("--use-optimized-params", type=str, default=None,
                         help="Path to optimized_params.json from walk-forward optimization")
+    parser.add_argument("--use-regime", action="store_true",
+                        help="Enable market regime detection (adjusts confidence/sizing per regime)")
+    parser.add_argument("--regime-mode", type=str, default="adjust",
+                        choices=["adjust", "filter"],
+                        help="Regime mode: 'adjust' adapts params, 'filter' skips BEAR/CHOPPY")
 
     args = parser.parse_args()
 
@@ -76,6 +81,8 @@ def main():
         # Walk-forward: retrains models at each step (no look-ahead bias)
         if args.use_optimized_params:
             print(f"\nUsing optimized params from: {args.use_optimized_params}")
+        if args.use_regime:
+            print(f"Regime detection: ENABLED (mode={args.regime_mode})")
         print(f"Running walk-forward backtest (retraining at each step)...")
         result = backtester.walk_forward_ml(
             symbols=symbols,
@@ -86,7 +93,9 @@ def main():
             sequence_length=20,
             max_positions=args.max_positions,
             use_ensemble=args.ensemble,
-            optimized_params_path=args.use_optimized_params
+            optimized_params_path=args.use_optimized_params,
+            use_regime=args.use_regime,
+            regime_mode=args.regime_mode
         )
 
         Backtester.print_results(result)

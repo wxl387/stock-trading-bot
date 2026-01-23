@@ -49,6 +49,11 @@ def main():
                         help="Output path for params JSON (default: models/optimized_params.json)")
     parser.add_argument("--n-jobs", type=int, default=1,
                         help="Parallel trials (default: 1)")
+    parser.add_argument("--use-regime", action="store_true",
+                        help="Enable regime-adaptive trading in optimization windows")
+    parser.add_argument("--regime-mode", type=str, default="adjust",
+                        choices=["adjust", "filter"],
+                        help="Regime mode for optimization")
 
     args = parser.parse_args()
     symbols = [s.strip() for s in args.symbols.split(",")]
@@ -63,6 +68,8 @@ def main():
     print(f"Metric: {args.metric}")
     print(f"Optimize trading params: {optimize_trading}")
     print(f"Optimize features: {args.optimize_features}")
+    if args.use_regime:
+        print(f"Regime detection: ENABLED (mode={args.regime_mode})")
     print("=" * 60)
 
     from src.ml.walk_forward_optimizer import WalkForwardOptimizer
@@ -77,6 +84,8 @@ def main():
         optimize_metric=args.metric,
         optimize_trading_params=optimize_trading,
         optimize_features=args.optimize_features,
+        use_regime=args.use_regime,
+        regime_mode=args.regime_mode,
     )
 
     # Run optimization
