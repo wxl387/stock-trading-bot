@@ -14,6 +14,10 @@ lightgbm>=4.0.0
 tensorflow>=2.15.0
 optuna>=3.5.0
 
+# NLP Sentiment Analysis
+transformers>=4.35.0
+torch>=2.1.0
+
 # Backtesting
 vectorbt>=0.25.0
 

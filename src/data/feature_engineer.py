@@ -322,7 +322,17 @@ class FeatureEngineer:
         use_cache: bool = True
     ) -> pd.DataFrame:
         """
-        Add sentiment features from news analysis.
+        Add sentiment features from news analysis (FinBERT NLP).
+
+        Features added:
+        - sentiment_score: Daily avg sentiment (-1 to +1)
+        - sentiment_ma5: 5-day rolling average
+        - sentiment_volatility: 10-day rolling std
+        - article_count: Daily article volume
+        - sentiment_momentum: Change in sentiment (1-day diff)
+        - sentiment_dispersion: Std of individual article scores
+        - positive_ratio: % of positive articles
+        - news_intensity: Article count relative to 20-day avg
 
         Args:
             df: DataFrame with price data
@@ -334,12 +344,20 @@ class FeatureEngineer:
         """
         df = df.copy()
 
+        neutral_features = {
+            "sentiment_score": 0.0,
+            "sentiment_ma5": 0.0,
+            "sentiment_volatility": 0.0,
+            "article_count": 0,
+            "sentiment_momentum": 0.0,
+            "sentiment_dispersion": 0.0,
+            "positive_ratio": 0.0,
+            "news_intensity": 0.0,
+        }
+
         if symbol is None:
-            # Add neutral sentiment features
-            df["sentiment_score"] = 0.0
-            df["sentiment_ma5"] = 0.0
-            df["sentiment_volatility"] = 0.0
-            df["article_count"] = 0
+            for feat, val in neutral_features.items():
+                df[feat] = val
             return df
 
         try:
@@ -348,12 +366,15 @@ class FeatureEngineer:
             fetcher = get_sentiment_fetcher()
             df = fetcher.get_sentiment_features(symbol, df, use_cache=use_cache)
 
+            # Ensure all expected columns exist
+            for feat, val in neutral_features.items():
+                if feat not in df.columns:
+                    df[feat] = val
+
         except Exception as e:
             logger.warning(f"Could not add sentiment features: {e}")
-            df["sentiment_score"] = 0.0
-            df["sentiment_ma5"] = 0.0
-            df["sentiment_volatility"] = 0.0
-            df["article_count"] = 0
+            for feat, val in neutral_features.items():
+                df[feat] = val
 
         return df
 
@@ -715,7 +736,9 @@ class FeatureEngineer:
 
         if include_sentiment:
             features.extend([
-                "sentiment_score", "sentiment_ma5", "sentiment_volatility", "article_count"
+                "sentiment_score", "sentiment_ma5", "sentiment_volatility",
+                "article_count", "sentiment_momentum", "sentiment_dispersion",
+                "positive_ratio", "news_intensity"
             ])
 
         if include_macro:

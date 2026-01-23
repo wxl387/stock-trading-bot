@@ -1,6 +1,7 @@
 """
 Sentiment analysis fetcher for stock news.
-Fetches and aggregates news sentiment from multiple sources.
+Uses BlueSky/viaNexus API (MT Newswires) + FinBERT for NLP-based sentiment.
+Falls back to Finnhub/Alpha Vantage if BlueSky unavailable.
 """
 import logging
 import os
@@ -9,7 +10,6 @@ from typing import Dict, List, Optional
 import requests
 import pandas as pd
 import numpy as np
-from functools import lru_cache
 
 from config.settings import DATA_DIR
 
@@ -18,28 +18,23 @@ logger = logging.getLogger(__name__)
 
 class SentimentFetcher:
     """
-    Fetches news sentiment for stocks.
+    Fetches news sentiment for stocks using FinBERT NLP analysis.
 
     Sources (in order of preference):
-    1. Finnhub API - Company news with sentiment
-    2. Alpha Vantage - News sentiment API
-    3. Fallback to neutral sentiment if APIs unavailable
+    1. BlueSky/viaNexus API (MT Newswires) + FinBERT local NLP
+    2. Finnhub API + FinBERT
+    3. Alpha Vantage News Sentiment API
+    4. Fallback to neutral sentiment if all APIs unavailable
     """
 
     def __init__(
         self,
+        bluesky_api_token: Optional[str] = None,
         finnhub_api_key: Optional[str] = None,
         alpha_vantage_key: Optional[str] = None,
         cache_hours: int = 4
     ):
-        """
-        Initialize sentiment fetcher.
-
-        Args:
-            finnhub_api_key: Finnhub API key (from env FINNHUB_API_KEY)
-            alpha_vantage_key: Alpha Vantage API key (from env ALPHA_VANTAGE_API_KEY)
-            cache_hours: Hours to cache sentiment data
-        """
+        self.bluesky_api_token = bluesky_api_token or os.getenv("BLUESKY_API_TOKEN")
         self.finnhub_api_key = finnhub_api_key or os.getenv("FINNHUB_API_KEY")
         self.alpha_vantage_key = alpha_vantage_key or os.getenv("ALPHA_VANTAGE_API_KEY")
         self.cache_hours = cache_hours
@@ -51,9 +46,28 @@ class SentimentFetcher:
         # Session for API calls
         self.session = requests.Session()
 
+        # Lazy-loaded components
+        self._news_fetcher = None
+        self._analyzer = None
+
         logger.info(f"SentimentFetcher initialized. "
+                   f"BlueSky: {'available' if self.bluesky_api_token else 'N/A'}, "
                    f"Finnhub: {'available' if self.finnhub_api_key else 'N/A'}, "
                    f"Alpha Vantage: {'available' if self.alpha_vantage_key else 'N/A'}")
+
+    def _get_news_fetcher(self):
+        """Lazy-load NewsFetcher."""
+        if self._news_fetcher is None:
+            from src.data.news_fetcher import NewsFetcher
+            self._news_fetcher = NewsFetcher(api_token=self.bluesky_api_token)
+        return self._news_fetcher
+
+    def _get_analyzer(self):
+        """Lazy-load FinBERT analyzer."""
+        if self._analyzer is None:
+            from src.ml.finbert_analyzer import FinBERTAnalyzer
+            self._analyzer = FinBERTAnalyzer()
+        return self._analyzer
 
     def fetch_sentiment(
         self,
@@ -72,7 +86,8 @@ class SentimentFetcher:
             use_cache: Whether to use cached data
 
         Returns:
-            DataFrame with columns: date, sentiment_score, sentiment_label, article_count
+            DataFrame with columns: date, sentiment_score, article_count,
+            sentiment_dispersion, positive_ratio, sentiment_confidence
         """
         if end_date is None:
             end_date = datetime.now()
@@ -83,23 +98,32 @@ class SentimentFetcher:
         if use_cache:
             cached = self._load_cache(symbol)
             if cached is not None and len(cached) > 0:
-                # Filter to date range
                 cached = cached[(cached['date'] >= start_date.strftime('%Y-%m-%d')) &
                                (cached['date'] <= end_date.strftime('%Y-%m-%d'))]
                 if len(cached) > 0:
                     return cached
 
-        # Try Finnhub first
-        if self.finnhub_api_key:
+        # Try BlueSky + FinBERT first
+        if self.bluesky_api_token:
             try:
-                sentiment_df = self._fetch_finnhub_sentiment(symbol, start_date, end_date)
+                sentiment_df = self._fetch_bluesky_finbert(symbol)
                 if sentiment_df is not None and len(sentiment_df) > 0:
                     self._save_cache(symbol, sentiment_df)
                     return sentiment_df
             except Exception as e:
-                logger.warning(f"Finnhub sentiment fetch failed: {e}")
+                logger.warning(f"BlueSky+FinBERT sentiment failed for {symbol}: {e}")
 
-        # Try Alpha Vantage
+        # Try Finnhub + FinBERT
+        if self.finnhub_api_key:
+            try:
+                sentiment_df = self._fetch_finnhub_finbert(symbol, start_date, end_date)
+                if sentiment_df is not None and len(sentiment_df) > 0:
+                    self._save_cache(symbol, sentiment_df)
+                    return sentiment_df
+            except Exception as e:
+                logger.warning(f"Finnhub+FinBERT sentiment failed for {symbol}: {e}")
+
+        # Try Alpha Vantage (has its own sentiment scores)
         if self.alpha_vantage_key:
             try:
                 sentiment_df = self._fetch_alpha_vantage_sentiment(symbol)
@@ -107,19 +131,47 @@ class SentimentFetcher:
                     self._save_cache(symbol, sentiment_df)
                     return sentiment_df
             except Exception as e:
-                logger.warning(f"Alpha Vantage sentiment fetch failed: {e}")
+                logger.warning(f"Alpha Vantage sentiment failed for {symbol}: {e}")
 
         # Return empty DataFrame if no API available
         logger.warning(f"No sentiment data available for {symbol}")
         return self._create_neutral_sentiment(start_date, end_date)
 
-    def _fetch_finnhub_sentiment(
+    def _fetch_bluesky_finbert(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Fetch news from BlueSky API and analyze with FinBERT."""
+        news_fetcher = self._get_news_fetcher()
+        articles = news_fetcher.fetch_news(symbol, last=50)
+
+        if not articles:
+            return None
+
+        # Analyze with FinBERT
+        analyzer = self._get_analyzer()
+        daily_df = analyzer.analyze_articles(articles)
+
+        if daily_df.empty:
+            return None
+
+        # Rename to match expected schema
+        result = pd.DataFrame({
+            "date": daily_df["date"],
+            "sentiment_score": daily_df["sentiment_score"],
+            "article_count": daily_df["article_count"],
+            "sentiment_dispersion": daily_df["sentiment_dispersion"],
+            "positive_ratio": daily_df["positive_ratio"],
+            "sentiment_confidence": daily_df["sentiment_confidence"],
+        })
+
+        logger.info(f"BlueSky+FinBERT: {len(result)} days of sentiment for {symbol}")
+        return result
+
+    def _fetch_finnhub_finbert(
         self,
         symbol: str,
         start_date: datetime,
         end_date: datetime
     ) -> Optional[pd.DataFrame]:
-        """Fetch sentiment from Finnhub API."""
+        """Fetch news from Finnhub and analyze with FinBERT."""
         url = "https://finnhub.io/api/v1/company-news"
 
         params = {
@@ -137,36 +189,35 @@ class SentimentFetcher:
         if not news_items:
             return None
 
-        # Aggregate sentiment by date
-        daily_sentiment = {}
-
+        # Convert to article format expected by FinBERT analyzer
+        articles = []
         for item in news_items:
-            # Finnhub returns timestamp in seconds
-            date = datetime.fromtimestamp(item.get("datetime", 0)).strftime("%Y-%m-%d")
-
-            # Finnhub doesn't provide direct sentiment, so we use a simple heuristic
-            # based on headline keywords (in production, use NLP)
-            headline = item.get("headline", "").lower()
-            sentiment = self._analyze_headline_sentiment(headline)
-
-            if date not in daily_sentiment:
-                daily_sentiment[date] = {"scores": [], "count": 0}
-
-            daily_sentiment[date]["scores"].append(sentiment)
-            daily_sentiment[date]["count"] += 1
-
-        # Convert to DataFrame
-        records = []
-        for date, data in sorted(daily_sentiment.items()):
-            avg_sentiment = np.mean(data["scores"]) if data["scores"] else 0
-            records.append({
-                "date": date,
-                "sentiment_score": avg_sentiment,
-                "sentiment_label": self._score_to_label(avg_sentiment),
-                "article_count": data["count"]
+            articles.append({
+                "headline": item.get("headline", ""),
+                "summary": item.get("summary", ""),
+                "date": datetime.fromtimestamp(
+                    item.get("datetime", 0)
+                ).strftime("%Y-%m-%d"),
             })
 
-        return pd.DataFrame(records)
+        # Analyze with FinBERT
+        analyzer = self._get_analyzer()
+        daily_df = analyzer.analyze_articles(articles)
+
+        if daily_df.empty:
+            return None
+
+        result = pd.DataFrame({
+            "date": daily_df["date"],
+            "sentiment_score": daily_df["sentiment_score"],
+            "article_count": daily_df["article_count"],
+            "sentiment_dispersion": daily_df["sentiment_dispersion"],
+            "positive_ratio": daily_df["positive_ratio"],
+            "sentiment_confidence": daily_df["sentiment_confidence"],
+        })
+
+        logger.info(f"Finnhub+FinBERT: {len(result)} days of sentiment for {symbol}")
+        return result
 
     def _fetch_alpha_vantage_sentiment(self, symbol: str) -> Optional[pd.DataFrame]:
         """Fetch sentiment from Alpha Vantage News API."""
@@ -191,7 +242,6 @@ class SentimentFetcher:
         daily_sentiment = {}
 
         for article in data["feed"]:
-            # Parse date from time_published
             time_str = article.get("time_published", "")
             if len(time_str) >= 8:
                 date = f"{time_str[:4]}-{time_str[4:6]}-{time_str[6:8]}"
@@ -206,7 +256,6 @@ class SentimentFetcher:
                     break
 
             if ticker_sentiment is None:
-                # Use overall sentiment
                 ticker_sentiment = float(article.get("overall_sentiment_score", 0))
 
             if date not in daily_sentiment:
@@ -218,50 +267,18 @@ class SentimentFetcher:
         # Convert to DataFrame
         records = []
         for date, data in sorted(daily_sentiment.items()):
-            avg_sentiment = np.mean(data["scores"]) if data["scores"] else 0
+            scores = data["scores"]
+            avg_sentiment = np.mean(scores) if scores else 0
             records.append({
                 "date": date,
                 "sentiment_score": avg_sentiment,
-                "sentiment_label": self._score_to_label(avg_sentiment),
-                "article_count": data["count"]
+                "article_count": data["count"],
+                "sentiment_dispersion": float(np.std(scores)) if len(scores) > 1 else 0.0,
+                "positive_ratio": float(np.mean([s > 0.1 for s in scores])) if scores else 0.0,
+                "sentiment_confidence": float(np.mean([abs(s) for s in scores])) if scores else 0.0,
             })
 
-        return pd.DataFrame(records)
-
-    def _analyze_headline_sentiment(self, headline: str) -> float:
-        """
-        Simple rule-based sentiment analysis for headlines.
-        Returns score between -1 (bearish) and 1 (bullish).
-        """
-        bullish_words = [
-            "surge", "soar", "rally", "jump", "gain", "rise", "profit",
-            "beat", "exceed", "bullish", "upgrade", "buy", "strong",
-            "growth", "positive", "record", "high", "boom", "success"
-        ]
-
-        bearish_words = [
-            "drop", "fall", "crash", "plunge", "decline", "loss", "miss",
-            "bearish", "downgrade", "sell", "weak", "negative", "low",
-            "concern", "worry", "risk", "fail", "warning", "cut"
-        ]
-
-        bullish_count = sum(1 for word in bullish_words if word in headline)
-        bearish_count = sum(1 for word in bearish_words if word in headline)
-
-        total = bullish_count + bearish_count
-        if total == 0:
-            return 0.0
-
-        return (bullish_count - bearish_count) / total
-
-    def _score_to_label(self, score: float) -> str:
-        """Convert sentiment score to label."""
-        if score > 0.2:
-            return "bullish"
-        elif score < -0.2:
-            return "bearish"
-        else:
-            return "neutral"
+        return pd.DataFrame(records) if records else None
 
     def _create_neutral_sentiment(
         self,
@@ -273,8 +290,10 @@ class SentimentFetcher:
         return pd.DataFrame({
             "date": [d.strftime("%Y-%m-%d") for d in dates],
             "sentiment_score": [0.0] * len(dates),
-            "sentiment_label": ["neutral"] * len(dates),
-            "article_count": [0] * len(dates)
+            "article_count": [0] * len(dates),
+            "sentiment_dispersion": [0.0] * len(dates),
+            "positive_ratio": [0.0] * len(dates),
+            "sentiment_confidence": [0.0] * len(dates),
         })
 
     def _load_cache(self, symbol: str) -> Optional[pd.DataFrame]:
@@ -331,44 +350,57 @@ class SentimentFetcher:
         # Fetch sentiment
         sentiment_df = self.fetch_sentiment(
             symbol,
-            start_date=min_date - timedelta(days=30),  # Extra for rolling
+            start_date=min_date - timedelta(days=30),
             end_date=max_date,
             use_cache=use_cache
         )
 
         if sentiment_df.empty:
-            # Add neutral features
             df['sentiment_score'] = 0.0
             df['sentiment_ma5'] = 0.0
             df['sentiment_volatility'] = 0.0
             df['article_count'] = 0
+            df['sentiment_momentum'] = 0.0
+            df['sentiment_dispersion'] = 0.0
+            df['positive_ratio'] = 0.0
+            df['news_intensity'] = 0.0
             return df
 
-        # Merge with price data
-        sentiment_df['date'] = pd.to_datetime(sentiment_df['date'])
+        # Fix timezone: ensure both sides are tz-naive for merge
+        sentiment_df['date'] = pd.to_datetime(sentiment_df['date']).dt.tz_localize(None)
 
         if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'])
+            df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
+            merge_cols = ['date', 'sentiment_score', 'article_count',
+                         'sentiment_dispersion', 'positive_ratio']
+            available_cols = [c for c in merge_cols if c in sentiment_df.columns]
             merged = df.merge(
-                sentiment_df[['date', 'sentiment_score', 'article_count']],
+                sentiment_df[available_cols],
                 on='date',
                 how='left'
             )
         else:
-            df.index = pd.to_datetime(df.index)
+            df.index = pd.to_datetime(df.index).tz_localize(None)
             sentiment_df = sentiment_df.set_index('date')
+            merge_cols = ['sentiment_score', 'article_count',
+                         'sentiment_dispersion', 'positive_ratio']
+            available_cols = [c for c in merge_cols if c in sentiment_df.columns]
             merged = df.join(
-                sentiment_df[['sentiment_score', 'article_count']],
+                sentiment_df[available_cols],
                 how='left'
             )
 
         # Fill missing values
         merged['sentiment_score'] = merged['sentiment_score'].fillna(0)
         merged['article_count'] = merged['article_count'].fillna(0)
+        merged['sentiment_dispersion'] = merged.get('sentiment_dispersion', pd.Series(0.0, index=merged.index)).fillna(0)
+        merged['positive_ratio'] = merged.get('positive_ratio', pd.Series(0.0, index=merged.index)).fillna(0)
 
-        # Add rolling features
+        # Derived rolling features
         merged['sentiment_ma5'] = merged['sentiment_score'].rolling(5, min_periods=1).mean()
         merged['sentiment_volatility'] = merged['sentiment_score'].rolling(10, min_periods=1).std().fillna(0)
+        merged['sentiment_momentum'] = merged['sentiment_score'].diff(1).fillna(0)
+        merged['news_intensity'] = merged['article_count'] / merged['article_count'].rolling(20, min_periods=1).mean().replace(0, 1)
 
         return merged
 

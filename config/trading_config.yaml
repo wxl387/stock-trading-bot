@@ -172,3 +172,19 @@ retraining:
   auto_deploy: true               # Auto-deploy if model improves
   min_improvement: 0.01           # Minimum accuracy improvement (1%) to deploy
   notify_on_complete: true        # Log results when complete
+
+sentiment:
+  enabled: true
+  provider: "bluesky"             # bluesky, finnhub, alpha_vantage
+  analyzer: "finbert"             # finbert (local NLP on MPS GPU)
+  cache_hours: 4                  # Hours to cache sentiment data
+  articles_per_symbol: 50         # Number of articles to fetch per symbol
+  features:
+    - sentiment_score
+    - sentiment_ma5
+    - sentiment_volatility
+    - article_count
+    - sentiment_momentum
+    - sentiment_dispersion
+    - positive_ratio
+    - news_intensity
