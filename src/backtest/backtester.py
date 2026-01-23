@@ -855,7 +855,9 @@ class Backtester:
         confidence_threshold: float = 0.6,
         sequence_length: int = 20,
         max_positions: int = 5,
-        use_ensemble: bool = True
+        use_ensemble: bool = True,
+        model_params: Optional[Dict] = None,
+        optimized_params_path: Optional[str] = None
     ) -> BacktestResult:
         """
         Walk-forward ML backtest with model retraining at each step.
@@ -874,12 +876,27 @@ class Backtester:
             sequence_length: Sequence length for LSTM/CNN.
             max_positions: Maximum concurrent positions.
             use_ensemble: If True, train XGBoost+LSTM+CNN; else XGBoost only.
+            model_params: Optional dict of XGBoost hyperparameters.
+            optimized_params_path: Optional path to optimized_params.json.
 
         Returns:
             Combined BacktestResult across all out-of-sample windows.
         """
         from src.ml.models.xgboost_model import XGBoostModel
         from src.ml.models.ensemble_model import EnsembleModel
+
+        # Load optimized params if path provided
+        if optimized_params_path:
+            import json
+            with open(optimized_params_path, 'r') as f:
+                opt_data = json.load(f)
+            model_params = opt_data.get("best_model_params", model_params)
+            if "best_trading_params" in opt_data:
+                confidence_threshold = opt_data["best_trading_params"].get(
+                    "confidence_threshold", confidence_threshold)
+                max_positions = opt_data["best_trading_params"].get(
+                    "max_positions", max_positions)
+            logger.info(f"Loaded optimized params from {optimized_params_path}")
 
         logger.info(f"Starting walk-forward backtest: train={train_period}d, test={test_period}d, step={step}d")
 
@@ -966,7 +983,14 @@ class Backtester:
 
             # Train models
             try:
-                xgb_model = XGBoostModel()
+                if model_params:
+                    xgb_params = {k: v for k, v in model_params.items()
+                                  if k in ["n_estimators", "max_depth", "learning_rate",
+                                           "subsample", "colsample_bytree", "min_child_weight",
+                                           "gamma", "reg_alpha", "reg_lambda"]}
+                    xgb_model = XGBoostModel(**xgb_params)
+                else:
+                    xgb_model = XGBoostModel()
                 xgb_model.train(X_train, y_train)
 
                 if use_ensemble:

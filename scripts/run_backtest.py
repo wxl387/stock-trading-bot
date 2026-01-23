@@ -40,6 +40,8 @@ def main():
                         help="Test window in days for walk-forward (default: 63)")
     parser.add_argument("--no-chart", action="store_true",
                         help="Skip generating equity curve chart")
+    parser.add_argument("--use-optimized-params", type=str, default=None,
+                        help="Path to optimized_params.json from walk-forward optimization")
 
     args = parser.parse_args()
 
@@ -72,7 +74,9 @@ def main():
 
     if args.walk_forward:
         # Walk-forward: retrains models at each step (no look-ahead bias)
-        print(f"\nRunning walk-forward backtest (retraining at each step)...")
+        if args.use_optimized_params:
+            print(f"\nUsing optimized params from: {args.use_optimized_params}")
+        print(f"Running walk-forward backtest (retraining at each step)...")
         result = backtester.walk_forward_ml(
             symbols=symbols,
             train_period=args.train_period,
@@ -81,7 +85,8 @@ def main():
             confidence_threshold=args.confidence,
             sequence_length=20,
             max_positions=args.max_positions,
-            use_ensemble=args.ensemble
+            use_ensemble=args.ensemble,
+            optimized_params_path=args.use_optimized_params
         )
 
         Backtester.print_results(result)
