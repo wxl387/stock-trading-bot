@@ -121,8 +121,8 @@ class TestBacktestMetrics:
 
         result = backtester.run_simple_backtest(prices, signals)
 
-        # Max drawdown should be <= 0
-        assert result.max_drawdown <= 0
+        # Max drawdown should be >= 0 (stored as positive value)
+        assert result.max_drawdown >= 0
 
     def test_win_rate_calculation(self, sample_ohlcv_data_long):
         """Test win rate is calculated correctly."""

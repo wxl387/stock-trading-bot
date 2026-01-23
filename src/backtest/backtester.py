@@ -2,7 +2,7 @@
 Backtesting module for strategy validation.
 """
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 import pandas as pd
 import numpy as np
@@ -34,6 +34,10 @@ class BacktestResult:
     avg_trade_duration: float
     final_value: float
     trades: pd.DataFrame
+    equity_curve: Optional[pd.Series] = None
+    benchmark_return: Optional[float] = None
+    spy_return: Optional[float] = None
+    daily_returns: Optional[pd.Series] = None
 
 
 class Backtester:
@@ -62,6 +66,55 @@ class Backtester:
 
         self.data_fetcher = DataFetcher()
         self.feature_engineer = FeatureEngineer()
+
+        # Store benchmark data for plotting after run
+        self._last_bh_equity = None
+        self._last_spy_equity = None
+
+    def _calculate_sortino(self, daily_returns: pd.Series, risk_free_rate: float = 0.05) -> float:
+        """Calculate Sortino ratio using downside deviation."""
+        if len(daily_returns) < 2 or daily_returns.std() == 0:
+            return 0.0
+        daily_rf = risk_free_rate / 252
+        excess_returns = daily_returns - daily_rf
+        downside_returns = excess_returns[excess_returns < 0]
+        if len(downside_returns) == 0:
+            return 0.0
+        downside_dev = np.sqrt((downside_returns ** 2).mean()) * np.sqrt(252)
+        if downside_dev == 0:
+            return 0.0
+        ann_return = (1 + daily_returns.mean()) ** 252 - 1
+        return (ann_return - risk_free_rate) / downside_dev
+
+    def _get_feature_columns(self, df: pd.DataFrame) -> List[str]:
+        """Get feature columns excluding metadata/label columns."""
+        exclude = [
+            "symbol", "date", "dividends", "stock_splits",
+            "future_returns", "label_binary", "label_3class"
+        ]
+        return [c for c in df.columns if c not in exclude]
+
+    def run_simple_backtest(
+        self,
+        prices: pd.Series,
+        signals: pd.Series
+    ) -> BacktestResult:
+        """
+        Run backtest with numeric signals.
+
+        Args:
+            prices: Price series with datetime index.
+            signals: Numeric series: 1=buy, -1=sell, 0=hold.
+
+        Returns:
+            BacktestResult with performance metrics.
+        """
+        if prices.empty or signals.empty:
+            raise ValueError("Prices and signals must be non-empty")
+
+        entries = (signals > 0)
+        exits = (signals < 0)
+        return self._run_simple(entries, exits, prices)
 
     def run(
         self,
@@ -121,7 +174,8 @@ class Backtester:
             include_lagged=True,
             use_cache=True
         )
-        df = df.dropna()
+        df = df.ffill().fillna(0)
+        df = df[df['close'] > 0]
 
         # Generate signals
         entries, exits = strategy_func(df)
@@ -232,15 +286,20 @@ class Backtester:
             win_rate = 0
             profit_factor = 0
 
-        # Calculate Sharpe ratio approximation
-        if len(trades_df) > 0 and "return" in trades_df.columns:
-            returns = trades_df["return"]
-            sharpe = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() > 0 else 0
-        else:
-            sharpe = 0
-
-        # Calculate max drawdown
+        # Calculate equity curve and daily returns
         equity_curve = self._calculate_equity_curve(entries, exits, prices)
+        daily_returns = equity_curve.pct_change().dropna()
+
+        # Sharpe ratio from daily returns
+        if len(daily_returns) > 1 and daily_returns.std() > 0:
+            sharpe = (daily_returns.mean() / daily_returns.std()) * np.sqrt(252)
+        else:
+            sharpe = 0.0
+
+        # Sortino ratio from daily returns
+        sortino = self._calculate_sortino(daily_returns)
+
+        # Max drawdown
         max_drawdown = self._calculate_max_drawdown(equity_curve)
 
         # Annualized return
@@ -252,14 +311,16 @@ class Backtester:
             total_return=total_return,
             annualized_return=annualized_return,
             sharpe_ratio=sharpe,
-            sortino_ratio=sharpe * 0.8,  # Approximation
+            sortino_ratio=sortino,
             max_drawdown=max_drawdown,
             win_rate=win_rate,
             profit_factor=profit_factor,
             total_trades=len(trades_df),
             avg_trade_duration=0,
             final_value=final_value,
-            trades=trades_df
+            trades=trades_df,
+            equity_curve=equity_curve,
+            daily_returns=daily_returns
         )
 
     def _calculate_equity_curve(
@@ -325,7 +386,8 @@ class Backtester:
             include_lagged=True,
             use_cache=True
         )
-        df = df.dropna()
+        df = df.ffill().fillna(0)
+        df = df[df['close'] > 0]
 
         results = []
 
@@ -406,7 +468,8 @@ class Backtester:
             include_lagged=True,
             use_cache=True
         )
-        df = df.dropna()
+        df = df.ffill().fillna(0)
+        df = df[df['close'] > 0]
 
         # Get feature columns (same as training)
         exclude_cols = ["symbol", "date", "dividends", "stock_splits", "future_returns", "label_binary", "label_3class"]
@@ -481,14 +544,16 @@ class Backtester:
                     include_lagged=True,
                     use_cache=True
                 )
-                df = df.dropna()
+                # Fill NaN from optional features (macro/sentiment may be unavailable)
+                df = df.ffill().fillna(0)
+                df = df[df['close'] > 0]
 
                 exclude_cols = ["symbol", "date", "dividends", "stock_splits", "future_returns", "label_binary", "label_3class"]
                 feature_cols = [c for c in df.columns if c not in exclude_cols]
                 X = df[feature_cols].values
                 prices = df["close"]
 
-                is_ensemble = hasattr(model, 'loaded_models') and len(getattr(model, 'loaded_models', {})) > 1
+                is_ensemble = hasattr(model, 'active_models') and len(getattr(model, 'active_models', [])) > 1
 
                 if is_ensemble:
                     X_seq, _ = create_sequences(df[feature_cols], pd.Series([0]*len(df)), sequence_length)
@@ -518,7 +583,19 @@ class Backtester:
 
         # Simulate portfolio trading
         signals_df = pd.DataFrame(all_signals)
-        return self._simulate_portfolio(signals_df, all_prices, confidence_threshold, max_positions)
+        result = self._simulate_portfolio(signals_df, all_prices, confidence_threshold, max_positions)
+
+        # Add benchmark comparison
+        if result.equity_curve is not None and len(result.equity_curve) > 0:
+            bh_return, spy_return, bh_equity, spy_equity = self._calculate_benchmarks(
+                result.equity_curve, symbols, period
+            )
+            result.benchmark_return = bh_return
+            result.spy_return = spy_return
+            self._last_bh_equity = bh_equity
+            self._last_spy_equity = spy_equity
+
+        return result
 
     def _simulate_portfolio(
         self,
@@ -622,20 +699,33 @@ class Backtester:
             total_wins = wins["pnl"].sum() if len(wins) > 0 else 0
             total_losses = abs(losses["pnl"].sum()) if len(losses) > 0 else 1
             profit_factor = total_wins / total_losses if total_losses > 0 else float("inf")
-            returns = trades_df["return"]
-            sharpe = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() > 0 else 0
         else:
             win_rate = 0
             profit_factor = 0
-            sharpe = 0
 
-        # Max drawdown from equity curve
+        # Equity curve and daily returns
         if len(equity_df) > 0:
-            peak = equity_df["equity"].expanding().max()
-            drawdown = (equity_df["equity"] - peak) / peak
+            equity_series = equity_df["equity"]
+            daily_returns = equity_series.pct_change().dropna()
+
+            # Sharpe from daily equity returns
+            if len(daily_returns) > 1 and daily_returns.std() > 0:
+                sharpe = (daily_returns.mean() / daily_returns.std()) * np.sqrt(252)
+            else:
+                sharpe = 0.0
+
+            sortino = self._calculate_sortino(daily_returns)
+
+            # Max drawdown
+            peak = equity_series.expanding().max()
+            drawdown = (equity_series - peak) / peak
             max_drawdown = abs(drawdown.min())
         else:
-            max_drawdown = 0
+            equity_series = pd.Series(dtype=float)
+            daily_returns = pd.Series(dtype=float)
+            sharpe = 0.0
+            sortino = 0.0
+            max_drawdown = 0.0
 
         # Annualized return
         if len(equity_df) > 1:
@@ -649,14 +739,16 @@ class Backtester:
             total_return=total_return,
             annualized_return=annualized_return,
             sharpe_ratio=sharpe,
-            sortino_ratio=sharpe * 0.8,
+            sortino_ratio=sortino,
             max_drawdown=max_drawdown,
             win_rate=win_rate,
             profit_factor=profit_factor,
             total_trades=len(trades_df),
             avg_trade_duration=0,
             final_value=final_value,
-            trades=trades_df
+            trades=trades_df,
+            equity_curve=equity_series,
+            daily_returns=daily_returns
         )
 
     @staticmethod
@@ -675,3 +767,597 @@ class Backtester:
         print(f"Total Trades:      {result.total_trades:>10}")
         print(f"Final Value:       ${result.final_value:>10,.2f}")
         print("=" * 50)
+
+        if result.benchmark_return is not None:
+            print(f"\nBENCHMARK COMPARISON")
+            print("-" * 50)
+            print(f"Strategy Return:   {result.total_return:>10.2%}")
+            print(f"Buy & Hold Return: {result.benchmark_return:>10.2%}")
+            if result.spy_return is not None:
+                print(f"SPY Return:        {result.spy_return:>10.2%}")
+            alpha_bh = result.total_return - result.benchmark_return
+            print(f"Alpha vs B&H:      {alpha_bh:>+10.2%}")
+            if result.spy_return is not None:
+                alpha_spy = result.total_return - result.spy_return
+                print(f"Alpha vs SPY:      {alpha_spy:>+10.2%}")
+
+    def _calculate_benchmarks(
+        self,
+        equity_curve: pd.Series,
+        symbols: List[str],
+        period: str
+    ) -> Tuple[float, float, pd.Series, pd.Series]:
+        """
+        Calculate benchmark returns for comparison.
+
+        Returns:
+            (buy_hold_return, spy_return, buy_hold_equity, spy_equity)
+        """
+        # Ensure equity curve index is tz-naive for comparison
+        eq_index = equity_curve.index
+        if eq_index.tz is not None:
+            eq_index = eq_index.tz_localize(None)
+
+        # Equal-weight buy-and-hold of same symbols
+        buy_hold_values = []
+        for symbol in symbols:
+            try:
+                df = self.data_fetcher.fetch_historical(symbol, period=period)
+                if not df.empty:
+                    prices = df['close'].copy()
+                    if prices.index.tz is not None:
+                        prices.index = prices.index.tz_localize(None)
+                    prices = prices.reindex(eq_index, method='ffill').dropna()
+                    if len(prices) > 0:
+                        normalized = prices / prices.iloc[0]
+                        buy_hold_values.append(normalized)
+            except Exception:
+                pass
+
+        if buy_hold_values:
+            equal_weight = pd.concat(buy_hold_values, axis=1).mean(axis=1)
+            buy_hold_equity = equal_weight * self.initial_capital
+            buy_hold_return = float(equal_weight.iloc[-1] - 1.0)
+        else:
+            buy_hold_equity = pd.Series(self.initial_capital, index=eq_index)
+            buy_hold_return = 0.0
+
+        # SPY benchmark
+        try:
+            spy_df = self.data_fetcher.fetch_historical("SPY", period=period)
+            if not spy_df.empty:
+                spy_prices = spy_df['close'].copy()
+                if spy_prices.index.tz is not None:
+                    spy_prices.index = spy_prices.index.tz_localize(None)
+                spy_prices = spy_prices.reindex(eq_index, method='ffill').dropna()
+                if len(spy_prices) > 0:
+                    spy_normalized = spy_prices / spy_prices.iloc[0]
+                    spy_equity = spy_normalized * self.initial_capital
+                    spy_return = float(spy_normalized.iloc[-1] - 1.0)
+                else:
+                    spy_equity = pd.Series(self.initial_capital, index=eq_index)
+                    spy_return = 0.0
+            else:
+                spy_equity = pd.Series(self.initial_capital, index=eq_index)
+                spy_return = 0.0
+        except Exception:
+            spy_equity = pd.Series(self.initial_capital, index=eq_index)
+            spy_return = 0.0
+
+        return buy_hold_return, spy_return, buy_hold_equity, spy_equity
+
+    def walk_forward_ml(
+        self,
+        symbols: List[str],
+        train_period: int = 252,
+        test_period: int = 63,
+        step: int = 63,
+        confidence_threshold: float = 0.6,
+        sequence_length: int = 20,
+        max_positions: int = 5,
+        use_ensemble: bool = True
+    ) -> BacktestResult:
+        """
+        Walk-forward ML backtest with model retraining at each step.
+
+        For each window:
+          1. Train fresh models on train_period days
+          2. Test on next test_period days (out-of-sample)
+          3. Advance by step days and repeat
+
+        Args:
+            symbols: List of stock symbols.
+            train_period: Training window in days.
+            test_period: Test window in days.
+            step: Step size in days.
+            confidence_threshold: Probability threshold for entry.
+            sequence_length: Sequence length for LSTM/CNN.
+            max_positions: Maximum concurrent positions.
+            use_ensemble: If True, train XGBoost+LSTM+CNN; else XGBoost only.
+
+        Returns:
+            Combined BacktestResult across all out-of-sample windows.
+        """
+        from src.ml.models.xgboost_model import XGBoostModel
+        from src.ml.models.ensemble_model import EnsembleModel
+
+        logger.info(f"Starting walk-forward backtest: train={train_period}d, test={test_period}d, step={step}d")
+
+        # Fetch and prepare all data
+        all_data = {}
+        for symbol in symbols:
+            try:
+                df = self.data_fetcher.fetch_historical(symbol, period="5y")
+                if df.empty:
+                    continue
+                df = self.feature_engineer.add_all_features_extended(
+                    df, symbol=symbol,
+                    include_sentiment=False,  # Skip sentiment for speed in walk-forward
+                    include_macro=True,
+                    include_cross_asset=True,
+                    include_interactions=True,
+                    include_lagged=True,
+                    use_cache=True
+                )
+                df = df.ffill().fillna(0)
+                df = df[df['close'] > 0]
+                if len(df) > train_period + test_period:
+                    all_data[symbol] = df
+                    logger.info(f"  {symbol}: {len(df)} samples loaded")
+            except Exception as e:
+                logger.warning(f"  {symbol}: failed to load - {e}")
+
+        if not all_data:
+            raise ValueError("No valid data for walk-forward backtest")
+
+        # Find common date range
+        common_dates = None
+        for df in all_data.values():
+            dates = set(df.index)
+            common_dates = dates if common_dates is None else common_dates.intersection(dates)
+        common_dates = sorted(common_dates)
+        total_days = len(common_dates)
+
+        logger.info(f"Common dates: {total_days} days ({common_dates[0].date()} to {common_dates[-1].date()})")
+
+        # Walk-forward loop
+        all_equity = []
+        all_trades = []
+        capital = self.initial_capital
+        window_count = 0
+
+        for window_start in range(0, total_days - train_period - test_period + 1, step):
+            train_end = window_start + train_period
+            test_end = min(train_end + test_period, total_days)
+
+            train_dates = common_dates[window_start:train_end]
+            test_dates = common_dates[train_end:test_end]
+
+            if len(test_dates) == 0:
+                break
+
+            window_count += 1
+            logger.info(f"  Window {window_count}: train {train_dates[0].date()}-{train_dates[-1].date()}, "
+                       f"test {test_dates[0].date()}-{test_dates[-1].date()}")
+
+            # Prepare training data
+            X_train_list, y_train_list = [], []
+            feature_cols = None
+            for symbol, df in all_data.items():
+                train_df = df.loc[df.index.isin(train_dates)]
+                if len(train_df) < 50:
+                    continue
+                if feature_cols is None:
+                    feature_cols = self._get_feature_columns(train_df)
+                X_sym = train_df[feature_cols].copy()
+                # Create labels: price up in 5 days
+                y_sym = (train_df['close'].shift(-5) / train_df['close'] - 1 > 0).astype(int)
+                # Drop last 5 rows (no future label)
+                X_sym = X_sym.iloc[:-5]
+                y_sym = y_sym.iloc[:-5]
+                X_train_list.append(X_sym.reset_index(drop=True))
+                y_train_list.append(y_sym.reset_index(drop=True))
+
+            if not X_train_list:
+                continue
+
+            X_train = pd.concat(X_train_list, ignore_index=True)
+            y_train = pd.concat(y_train_list, ignore_index=True)
+
+            # Train models
+            try:
+                xgb_model = XGBoostModel()
+                xgb_model.train(X_train, y_train)
+
+                if use_ensemble:
+                    from src.ml.models.lstm_model import LSTMModel
+                    from src.ml.models.cnn_model import CNNModel
+
+                    # Create sequences for LSTM/CNN
+                    X_seq, y_seq = create_sequences(
+                        X_train.values, y_train.values, sequence_length
+                    )
+
+                    lstm_model = LSTMModel(
+                        sequence_length=sequence_length,
+                        n_features=len(feature_cols)
+                    )
+                    lstm_model.train(X_seq, y_seq, epochs=15)
+
+                    cnn_model = CNNModel(
+                        sequence_length=sequence_length,
+                        n_features=len(feature_cols)
+                    )
+                    cnn_model.train(X_seq, y_seq, epochs=15)
+
+                    # Create ensemble
+                    model = EnsembleModel(sequence_length=sequence_length)
+                    model.xgboost_model = xgb_model
+                    model.lstm_model = lstm_model
+                    model.cnn_model = cnn_model
+                    model.active_models = ["xgboost", "lstm", "cnn"]
+                    model.is_loaded = True
+                else:
+                    model = xgb_model
+
+            except Exception as e:
+                logger.error(f"  Training failed for window {window_count}: {e}")
+                continue
+
+            # Generate signals on test window
+            test_signals = []
+            test_prices = {}
+            for symbol, df in all_data.items():
+                test_df = df.loc[df.index.isin(test_dates)]
+                if len(test_df) < 1:
+                    continue
+
+                try:
+                    X_test = test_df[feature_cols]
+
+                    if use_ensemble and hasattr(model, 'predict_proba'):
+                        # For ensemble, need sequences
+                        # Get history before test window for sequences
+                        pre_test_idx = df.index.get_loc(test_dates[0])
+                        history_start = max(0, pre_test_idx - sequence_length)
+                        full_test = df.iloc[history_start:pre_test_idx + len(test_df)]
+                        X_full = full_test[feature_cols].values
+
+                        if len(X_full) >= sequence_length + 1:
+                            X_seq_test, _ = create_sequences(
+                                X_full,
+                                np.zeros(len(X_full)),
+                                sequence_length
+                            )
+                            # Align: sequences start at index sequence_length
+                            n_seq = len(X_seq_test)
+                            # Flat features aligned with sequences
+                            X_flat = pd.DataFrame(
+                                X_full[sequence_length:sequence_length + n_seq],
+                                columns=feature_cols
+                            )
+                            probas = model.predict_proba(X_flat, X_seq_test)
+                        else:
+                            # Not enough history, use XGBoost only
+                            probas = xgb_model.predict_proba(X_test)
+                    else:
+                        probas = model.predict_proba(X_test)
+
+                    prob_up = probas[:, 1] if probas.ndim > 1 else probas
+                    test_prices_sym = test_df['close']
+
+                    for i, (date, price) in enumerate(test_prices_sym.items()):
+                        if i < len(prob_up):
+                            test_signals.append({
+                                "date": date,
+                                "symbol": symbol,
+                                "price": price,
+                                "prob_up": prob_up[i]
+                            })
+
+                    test_prices[symbol] = test_prices_sym
+
+                except Exception as e:
+                    logger.debug(f"  Signal generation failed for {symbol}: {e}")
+
+            if not test_signals:
+                continue
+
+            # Simulate portfolio on this test window
+            signals_df = pd.DataFrame(test_signals)
+            window_result = self._simulate_portfolio_window(
+                signals_df, test_prices, confidence_threshold, max_positions, capital
+            )
+
+            capital = window_result.final_value
+            if window_result.equity_curve is not None:
+                all_equity.append(window_result.equity_curve)
+            if len(window_result.trades) > 0:
+                all_trades.append(window_result.trades)
+
+            logger.info(f"  Window {window_count} result: {window_result.total_return:.2%} "
+                       f"({window_result.total_trades} trades)")
+
+        # Combine results
+        if all_equity:
+            combined_equity = pd.concat(all_equity)
+        else:
+            combined_equity = pd.Series([self.initial_capital], index=[common_dates[0]])
+
+        if all_trades:
+            combined_trades = pd.concat(all_trades, ignore_index=True)
+        else:
+            combined_trades = pd.DataFrame()
+
+        # Calculate combined metrics
+        total_return = (capital - self.initial_capital) / self.initial_capital
+        daily_returns = combined_equity.pct_change().dropna()
+
+        if len(daily_returns) > 1 and daily_returns.std() > 0:
+            sharpe = (daily_returns.mean() / daily_returns.std()) * np.sqrt(252)
+        else:
+            sharpe = 0.0
+
+        sortino = self._calculate_sortino(daily_returns)
+
+        if len(combined_equity) > 0:
+            peak = combined_equity.expanding().max()
+            drawdown = (combined_equity - peak) / peak
+            max_drawdown = abs(drawdown.min())
+        else:
+            max_drawdown = 0.0
+
+        if len(combined_trades) > 0:
+            wins = combined_trades[combined_trades["return"] > 0]
+            losses = combined_trades[combined_trades["return"] <= 0]
+            win_rate = len(wins) / len(combined_trades)
+            total_wins = wins["pnl"].sum() if len(wins) > 0 else 0
+            total_losses = abs(losses["pnl"].sum()) if len(losses) > 0 else 1
+            profit_factor = total_wins / total_losses if total_losses > 0 else 0
+        else:
+            win_rate = 0
+            profit_factor = 0
+
+        days = (combined_equity.index[-1] - combined_equity.index[0]).days if len(combined_equity) > 1 else 0
+        years = days / 365.25 if days > 0 else 1
+        annualized_return = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0
+
+        result = BacktestResult(
+            total_return=total_return,
+            annualized_return=annualized_return,
+            sharpe_ratio=sharpe,
+            sortino_ratio=sortino,
+            max_drawdown=max_drawdown,
+            win_rate=win_rate,
+            profit_factor=profit_factor,
+            total_trades=len(combined_trades),
+            avg_trade_duration=0,
+            final_value=capital,
+            trades=combined_trades,
+            equity_curve=combined_equity,
+            daily_returns=daily_returns
+        )
+
+        # Add benchmarks
+        if len(combined_equity) > 0:
+            bh_return, spy_return, bh_equity, spy_equity = self._calculate_benchmarks(
+                combined_equity, symbols, "5y"
+            )
+            result.benchmark_return = bh_return
+            result.spy_return = spy_return
+            self._last_bh_equity = bh_equity
+            self._last_spy_equity = spy_equity
+
+        logger.info(f"Walk-forward complete: {window_count} windows, {total_return:.2%} total return")
+        return result
+
+    def _simulate_portfolio_window(
+        self,
+        signals_df: pd.DataFrame,
+        prices: Dict[str, pd.Series],
+        confidence_threshold: float,
+        max_positions: int,
+        starting_capital: float
+    ) -> BacktestResult:
+        """Simulate portfolio trading for a single window with custom starting capital."""
+        capital = starting_capital
+        positions = {}
+        trades = []
+        equity_history = []
+
+        for date in sorted(signals_df["date"].unique()):
+            day_signals = signals_df[signals_df["date"] == date]
+
+            # Current equity
+            equity = capital
+            for sym, pos in positions.items():
+                if sym in prices and date in prices[sym].index:
+                    equity += pos["shares"] * prices[sym].loc[date]
+            equity_history.append({"date": date, "equity": equity})
+
+            # Exits
+            for sym in list(positions.keys()):
+                sym_signal = day_signals[day_signals["symbol"] == sym]
+                if not sym_signal.empty:
+                    prob = sym_signal.iloc[0]["prob_up"]
+                    price = sym_signal.iloc[0]["price"]
+                    if prob < (1 - confidence_threshold):
+                        pos = positions.pop(sym)
+                        proceeds = pos["shares"] * price * (1 - self.commission - self.slippage)
+                        capital += proceeds
+                        trades.append({
+                            "symbol": sym,
+                            "entry_date": pos["entry_date"],
+                            "entry_price": pos["entry_price"],
+                            "exit_date": date,
+                            "exit_price": price,
+                            "shares": pos["shares"],
+                            "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
+                            "return": (price - pos["entry_price"]) / pos["entry_price"]
+                        })
+
+            # Entries
+            if len(positions) < max_positions:
+                candidates = day_signals[day_signals["prob_up"] > confidence_threshold]
+                candidates = candidates[~candidates["symbol"].isin(positions.keys())]
+                candidates = candidates.sort_values("prob_up", ascending=False)
+
+                for _, row in candidates.iterrows():
+                    if len(positions) >= max_positions:
+                        break
+                    position_value = capital / (max_positions - len(positions) + 1) * 0.95
+                    shares = int(position_value / row["price"])
+                    if shares > 0:
+                        cost = shares * row["price"] * (1 + self.commission + self.slippage)
+                        if cost <= capital:
+                            capital -= cost
+                            positions[row["symbol"]] = {
+                                "shares": shares,
+                                "entry_price": row["price"],
+                                "entry_date": date
+                            }
+
+        # Close remaining positions
+        for sym, pos in positions.items():
+            if sym in prices:
+                last_price = prices[sym].iloc[-1]
+                proceeds = pos["shares"] * last_price
+                capital += proceeds
+                trades.append({
+                    "symbol": sym,
+                    "entry_date": pos["entry_date"],
+                    "entry_price": pos["entry_price"],
+                    "exit_date": prices[sym].index[-1],
+                    "exit_price": last_price,
+                    "shares": pos["shares"],
+                    "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
+                    "return": (last_price - pos["entry_price"]) / pos["entry_price"]
+                })
+
+        trades_df = pd.DataFrame(trades)
+        equity_df = pd.DataFrame(equity_history).set_index("date")
+
+        total_return = (capital - starting_capital) / starting_capital
+        equity_series = equity_df["equity"] if len(equity_df) > 0 else pd.Series(dtype=float)
+
+        return BacktestResult(
+            total_return=total_return,
+            annualized_return=0,
+            sharpe_ratio=0,
+            sortino_ratio=0,
+            max_drawdown=0,
+            win_rate=0,
+            profit_factor=0,
+            total_trades=len(trades_df),
+            avg_trade_duration=0,
+            final_value=capital,
+            trades=trades_df,
+            equity_curve=equity_series
+        )
+
+    @staticmethod
+    def plot_results(
+        result: BacktestResult,
+        buy_hold_equity: Optional[pd.Series] = None,
+        spy_equity: Optional[pd.Series] = None,
+        title: str = "Backtest Results",
+        output_path: Optional[str] = None
+    ) -> str:
+        """
+        Plot equity curve with benchmarks and save to file.
+
+        Args:
+            result: BacktestResult with equity_curve populated.
+            buy_hold_equity: Optional equal-weight buy-hold equity curve.
+            spy_equity: Optional SPY equity curve.
+            title: Chart title.
+            output_path: File path to save (default: data/backtest_results.png).
+
+        Returns:
+            Path to saved chart file.
+        """
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+
+        if result.equity_curve is None or len(result.equity_curve) == 0:
+            raise ValueError("BacktestResult has no equity_curve data")
+
+        fig, axes = plt.subplots(3, 1, figsize=(12, 10),
+                                 gridspec_kw={'height_ratios': [3, 1, 1]})
+
+        # Panel 1: Equity curves
+        ax1 = axes[0]
+        ax1.plot(result.equity_curve.index, result.equity_curve.values,
+                 label=f'Strategy ({result.total_return:.1%})',
+                 linewidth=1.5, color='#1f77b4')
+        if buy_hold_equity is not None and len(buy_hold_equity) > 0:
+            bh_return = buy_hold_equity.iloc[-1] / buy_hold_equity.iloc[0] - 1
+            ax1.plot(buy_hold_equity.index, buy_hold_equity.values,
+                     label=f'Buy & Hold ({bh_return:.1%})',
+                     linewidth=1.0, color='#2ca02c', linestyle='--')
+        if spy_equity is not None and len(spy_equity) > 0:
+            spy_return = spy_equity.iloc[-1] / spy_equity.iloc[0] - 1
+            ax1.plot(spy_equity.index, spy_equity.values,
+                     label=f'SPY ({spy_return:.1%})',
+                     linewidth=1.0, color='#ff7f0e', linestyle='-.')
+        ax1.set_title(title, fontsize=14, fontweight='bold')
+        ax1.set_ylabel('Portfolio Value ($)')
+        ax1.legend(loc='upper left')
+        ax1.grid(True, alpha=0.3)
+        ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+
+        # Panel 2: Drawdown
+        ax2 = axes[1]
+        peak = result.equity_curve.expanding().max()
+        drawdown = (result.equity_curve - peak) / peak * 100
+        ax2.fill_between(drawdown.index, drawdown.values, 0, alpha=0.4, color='red')
+        ax2.set_ylabel('Drawdown (%)')
+        ax2.grid(True, alpha=0.3)
+
+        # Panel 3: Rolling Sharpe
+        ax3 = axes[2]
+        if result.daily_returns is not None and len(result.daily_returns) > 63:
+            rolling_sharpe = result.daily_returns.rolling(63).apply(
+                lambda x: x.mean() / x.std() * np.sqrt(252) if x.std() > 0 else 0,
+                raw=False
+            )
+            ax3.plot(rolling_sharpe.index, rolling_sharpe.values,
+                     color='purple', linewidth=1.0)
+            ax3.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+            ax3.set_ylabel('Rolling Sharpe (63d)')
+        else:
+            ax3.set_ylabel('Rolling Sharpe')
+        ax3.grid(True, alpha=0.3)
+        ax3.set_xlabel('Date')
+
+        # Format x-axis
+        for ax in axes:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
+        # Metrics text
+        metrics_text = (
+            f"Return: {result.total_return:.2%}  |  "
+            f"Sharpe: {result.sharpe_ratio:.2f}  |  "
+            f"Sortino: {result.sortino_ratio:.2f}  |  "
+            f"MaxDD: {result.max_drawdown:.2%}  |  "
+            f"Win Rate: {result.win_rate:.0%}  |  "
+            f"Trades: {result.total_trades}"
+        )
+        fig.text(0.5, 0.01, metrics_text, ha='center', fontsize=9,
+                 style='italic', color='#555555')
+
+        plt.tight_layout(rect=[0, 0.03, 1, 1])
+
+        if output_path is None:
+            from config.settings import DATA_DIR
+            output_path = str(DATA_DIR / "backtest_results.png")
+
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+
+        logger.info(f"Saved backtest chart to {output_path}")
+        return output_path
