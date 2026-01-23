@@ -437,7 +437,9 @@ class RetrainingPipeline:
                 results[model_type] = {
                     "version": version,
                     "metrics": metrics,
-                    "model": model
+                    "model": model,
+                    "X": X,
+                    "y": y
                 }
 
             except Exception as e:
@@ -497,6 +499,318 @@ class RetrainingPipeline:
             logger.info(
                 f"Kept current model (new accuracy: {new_accuracy:.4f}, "
                 f"improvement: {improvement:.4f} < threshold {self.min_improvement_threshold})"
+            )
+            return False
+
+    def validate_with_walk_forward(
+        self,
+        model,
+        model_type: str,
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_windows: int = 3,
+        min_sharpe: float = 0.0,
+        min_profit_factor: float = 1.0,
+        max_drawdown: float = 0.25,
+        confidence_threshold: float = 0.52
+    ) -> Tuple[bool, Dict[str, float]]:
+        """
+        Run walk-forward backtest on candidate model before deployment.
+
+        Uses multiple walk-forward windows to measure trading metrics
+        (Sharpe, profit factor, max drawdown) for a more robust evaluation
+        than a simple accuracy comparison.
+
+        Args:
+            model: Trained model with predict_proba method.
+            model_type: Type of model (xgboost, lstm, cnn).
+            X: Full feature DataFrame.
+            y: Full target Series.
+            n_windows: Number of walk-forward windows.
+            min_sharpe: Minimum average Sharpe ratio to pass.
+            min_profit_factor: Minimum profit factor to pass.
+            max_drawdown: Maximum drawdown allowed.
+            confidence_threshold: Signal threshold for trading simulation.
+
+        Returns:
+            (passed, metrics_dict) tuple.
+        """
+        logger.info(f"Running walk-forward validation for {model_type} ({n_windows} windows)")
+
+        n_samples = len(X)
+        test_size = n_samples // (n_windows + 1)
+        window_metrics = []
+
+        for i in range(n_windows):
+            # Define train/test split for this window
+            test_start = n_samples - (n_windows - i) * test_size
+            test_end = test_start + test_size
+            train_end = test_start
+
+            if train_end < 50 or test_end > n_samples:
+                continue
+
+            X_test = X.iloc[test_start:test_end]
+            y_test = y.iloc[test_start:test_end].values
+
+            try:
+                # Get predictions
+                if model_type == "xgboost":
+                    probas = model.predict_proba(X_test)
+                else:
+                    from src.ml.sequence_utils import create_sequences
+                    X_seq, y_seq = create_sequences(
+                        X_test, pd.Series(y_test), self.sequence_length
+                    )
+                    if len(X_seq) < 5:
+                        continue
+                    probas = model.predict_proba(X_seq)
+                    y_test = y_seq
+
+                if probas is None or len(probas) == 0:
+                    continue
+
+                prob_up = probas[:, 1]
+                predictions = (prob_up > 0.5).astype(int)
+
+                # Calculate accuracy
+                from sklearn.metrics import accuracy_score
+                accuracy = accuracy_score(y_test, predictions)
+
+                # Simulate trading returns
+                signals = prob_up > confidence_threshold
+                # Use actual returns direction as proxy
+                actual_directions = (y_test == 1).astype(float) * 2 - 1  # +1 or -1
+                daily_return_proxy = 0.01  # Assume ~1% avg daily move for signal days
+                trade_returns = []
+                for j, sig in enumerate(signals):
+                    if sig:
+                        # Long signal: gain if correct, lose if wrong
+                        trade_returns.append(
+                            daily_return_proxy * actual_directions[j]
+                        )
+
+                trade_returns = np.array(trade_returns) if trade_returns else np.array([0.0])
+
+                # Sharpe
+                if len(trade_returns) > 1 and trade_returns.std() > 0:
+                    sharpe = (trade_returns.mean() / trade_returns.std()) * np.sqrt(252)
+                else:
+                    sharpe = 0.0
+
+                # Win rate and profit factor
+                wins = trade_returns[trade_returns > 0]
+                losses = trade_returns[trade_returns < 0]
+                win_rate = len(wins) / len(trade_returns) if len(trade_returns) > 0 else 0.0
+                profit_factor = (
+                    abs(wins.sum() / losses.sum())
+                    if len(losses) > 0 and losses.sum() != 0
+                    else float('inf') if len(wins) > 0 else 0.0
+                )
+
+                # Max drawdown
+                cumulative = np.cumsum(trade_returns)
+                peak = np.maximum.accumulate(cumulative)
+                drawdowns = (cumulative - peak)
+                max_dd = abs(drawdowns.min()) if len(drawdowns) > 0 else 0.0
+
+                window_metrics.append({
+                    "accuracy": accuracy,
+                    "sharpe_ratio": sharpe,
+                    "win_rate": win_rate,
+                    "profit_factor": min(profit_factor, 10.0),
+                    "max_drawdown": max_dd,
+                    "n_trades": int(signals.sum())
+                })
+
+            except Exception as e:
+                logger.warning(f"Walk-forward window {i} failed: {e}")
+                continue
+
+        if not window_metrics:
+            logger.warning("No valid walk-forward windows")
+            return False, {}
+
+        # Average across windows
+        avg_metrics = {
+            "accuracy": np.mean([m["accuracy"] for m in window_metrics]),
+            "sharpe_ratio": np.mean([m["sharpe_ratio"] for m in window_metrics]),
+            "win_rate": np.mean([m["win_rate"] for m in window_metrics]),
+            "profit_factor": np.mean([m["profit_factor"] for m in window_metrics]),
+            "max_drawdown": np.max([m["max_drawdown"] for m in window_metrics]),
+            "n_windows": len(window_metrics),
+            "total_trades": sum(m["n_trades"] for m in window_metrics)
+        }
+
+        # Check pass criteria
+        passed = (
+            avg_metrics["sharpe_ratio"] >= min_sharpe
+            and avg_metrics["profit_factor"] >= min_profit_factor
+            and avg_metrics["max_drawdown"] <= max_drawdown
+        )
+
+        status = "PASSED" if passed else "FAILED"
+        logger.info(
+            f"Walk-forward validation {status}: "
+            f"Sharpe={avg_metrics['sharpe_ratio']:.3f}, "
+            f"PF={avg_metrics['profit_factor']:.3f}, "
+            f"MaxDD={avg_metrics['max_drawdown']:.3f}"
+        )
+
+        return passed, avg_metrics
+
+    def compare_and_deploy_enhanced(
+        self,
+        model_type: str,
+        new_version: str,
+        production_name: str,
+        new_model=None,
+        X: Optional[pd.DataFrame] = None,
+        y: Optional[pd.Series] = None,
+        use_walk_forward: bool = True,
+        walk_forward_config: Optional[Dict] = None,
+        auto_rollback_manager=None
+    ) -> bool:
+        """
+        Enhanced compare-and-deploy using walk-forward validation and multi-metric comparison.
+
+        Args:
+            model_type: Type of model.
+            new_version: Version string.
+            production_name: Production deployment name.
+            new_model: The trained model object (for walk-forward validation).
+            X: Feature data for walk-forward validation.
+            y: Labels for walk-forward validation.
+            use_walk_forward: Whether to run walk-forward validation.
+            walk_forward_config: Config dict with n_windows, min_sharpe, etc.
+            auto_rollback_manager: AutoRollbackManager instance for grace period.
+
+        Returns:
+            True if deployed.
+        """
+        registry = self._load_registry()
+        current_prod = registry.get("production", {}).get(model_type)
+        new_metrics = registry.get("versions", {}).get(new_version, {}).get("metrics", {})
+
+        if not new_metrics:
+            logger.warning(f"No metrics found for version {new_version}")
+            return False
+
+        # Run walk-forward validation if enabled and model/data provided
+        wf_config = walk_forward_config or {}
+        wf_metrics = None
+        if use_walk_forward and new_model is not None and X is not None and y is not None:
+            passed, wf_metrics = self.validate_with_walk_forward(
+                model=new_model,
+                model_type=model_type,
+                X=X,
+                y=y,
+                n_windows=wf_config.get("n_windows", 3),
+                min_sharpe=wf_config.get("min_sharpe", 0.0),
+                min_profit_factor=wf_config.get("min_profit_factor", 1.0),
+                max_drawdown=wf_config.get("max_drawdown", 0.25)
+            )
+
+            if not passed:
+                logger.info(
+                    f"Walk-forward validation FAILED for {new_version}, skipping deployment"
+                )
+                return False
+
+            # Store walk-forward metrics in registry
+            if new_version in registry.get("versions", {}):
+                registry["versions"][new_version]["trading_metrics"] = wf_metrics
+                self._save_registry(registry)
+
+        # If no production model exists, deploy
+        if current_prod is None:
+            previous_version = None
+            self._deploy_model(model_type, new_version, production_name)
+            logger.info(f"Deployed {new_version} as new production model")
+            if auto_rollback_manager:
+                auto_rollback_manager.register_deployment(
+                    model_type, new_version, previous_version
+                )
+            return True
+
+        # Multi-metric comparison using weights
+        weights = wf_config.get("comparison_weights", {
+            "sharpe_ratio": 0.35,
+            "profit_factor": 0.25,
+            "accuracy": 0.20,
+            "max_drawdown": 0.20
+        })
+
+        current_metrics = current_prod.get("metrics", {})
+        current_trading = current_prod.get("trading_metrics", {})
+
+        # Calculate weighted improvement score
+        score = 0.0
+        comparisons = []
+
+        # Accuracy comparison
+        new_acc = new_metrics.get("accuracy", 0)
+        old_acc = current_metrics.get("accuracy", 0)
+        acc_improvement = new_acc - old_acc
+        score += weights.get("accuracy", 0.2) * (acc_improvement / max(old_acc, 0.01))
+        comparisons.append(f"accuracy: {old_acc:.3f}->{new_acc:.3f}")
+
+        # If walk-forward metrics are available, use them
+        if use_walk_forward and wf_metrics is not None:
+            # Sharpe comparison
+            new_sharpe = wf_metrics.get("sharpe_ratio", 0)
+            old_sharpe = current_trading.get("sharpe_ratio", 0)
+            if old_sharpe != 0:
+                score += weights.get("sharpe_ratio", 0.35) * (
+                    (new_sharpe - old_sharpe) / abs(old_sharpe)
+                )
+            elif new_sharpe > 0:
+                score += weights.get("sharpe_ratio", 0.35) * 0.5
+            comparisons.append(f"sharpe: {old_sharpe:.3f}->{new_sharpe:.3f}")
+
+            # Profit factor comparison
+            new_pf = wf_metrics.get("profit_factor", 0)
+            old_pf = current_trading.get("profit_factor", 1.0)
+            if old_pf > 0:
+                score += weights.get("profit_factor", 0.25) * (
+                    (new_pf - old_pf) / max(old_pf, 0.01)
+                )
+            comparisons.append(f"PF: {old_pf:.3f}->{new_pf:.3f}")
+
+            # Max drawdown comparison (lower is better)
+            new_dd = wf_metrics.get("max_drawdown", 1.0)
+            old_dd = current_trading.get("max_drawdown", 1.0)
+            if old_dd > 0:
+                dd_improvement = (old_dd - new_dd) / old_dd
+                score += weights.get("max_drawdown", 0.2) * dd_improvement
+            comparisons.append(f"maxDD: {old_dd:.3f}->{new_dd:.3f}")
+
+        # Deploy if weighted score indicates improvement
+        min_score = self.min_improvement_threshold
+        if score >= min_score:
+            previous_version = current_prod.get("version")
+            self._deploy_model(model_type, new_version, production_name)
+
+            # Store trading metrics with the deployment
+            registry = self._load_registry()
+            if "production" in registry and model_type in registry["production"]:
+                if use_walk_forward and wf_metrics is not None:
+                    registry["production"][model_type]["trading_metrics"] = wf_metrics
+                self._save_registry(registry)
+
+            logger.info(
+                f"Deployed {new_version} (score: {score:.4f}, {', '.join(comparisons)})"
+            )
+
+            if auto_rollback_manager:
+                auto_rollback_manager.register_deployment(
+                    model_type, new_version, previous_version
+                )
+            return True
+        else:
+            logger.info(
+                f"Kept current model (score: {score:.4f} < {min_score}, "
+                f"{', '.join(comparisons)})"
             )
             return False
 

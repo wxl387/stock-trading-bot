@@ -173,6 +173,36 @@ retraining:
   min_improvement: 0.01           # Minimum accuracy improvement (1%) to deploy
   notify_on_complete: true        # Log results when complete
 
+  # Phase 18: Degradation Detection
+  degradation_detection:
+    enabled: false                    # Opt-in: monitor production model health
+    check_interval_hours: 12          # How often to check for degradation
+    evaluation_window_days: 63        # Data window for evaluation (3 months)
+    n_eval_windows: 3                 # Walk-forward windows for evaluation
+    accuracy_drop_threshold: 0.05     # 5% accuracy drop triggers alert
+    confidence_collapse_threshold: 0.55  # Avg probability below this = collapse
+    sharpe_decline_threshold: -0.5    # Sharpe below this = degraded
+    min_win_rate: 0.40                # Win rate below 40% = problematic
+
+  # Phase 18: Auto-Rollback
+  auto_rollback:
+    enabled: false                    # Opt-in: rollback bad deployments
+    grace_period_days: 5              # Days to monitor after deployment
+    check_frequency_hours: 24         # How often to check during grace period
+
+  # Phase 18: Walk-Forward Validation
+  walk_forward_validation:
+    enabled: false                    # Opt-in: validate before deploy
+    n_windows: 3                      # Walk-forward windows for validation
+    min_sharpe: 0.0                   # Minimum Sharpe to pass
+    min_profit_factor: 1.0            # Minimum profit factor to pass
+    max_drawdown: 0.25                # Maximum drawdown allowed (25%)
+    comparison_weights:               # Multi-metric comparison weights
+      sharpe_ratio: 0.35
+      profit_factor: 0.25
+      accuracy: 0.20
+      max_drawdown: 0.20
+
 sentiment:
   enabled: true
   provider: "bluesky"             # bluesky, finnhub, alpha_vantage

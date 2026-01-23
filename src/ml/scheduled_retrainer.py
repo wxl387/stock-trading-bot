@@ -1,19 +1,23 @@
 """
 Scheduled model retraining using APScheduler.
 Runs alongside the trading bot to automatically retrain models on a schedule.
+Supports degradation detection, walk-forward validation, and auto-rollback (Phase 18).
 """
 import logging
+import threading
 from datetime import datetime
 from typing import Dict, List, Optional
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from config.settings import Settings, MODELS_DIR
 from src.ml.retraining import RetrainingPipeline
 
 logger = logging.getLogger(__name__)
+
 
 # Lazy import to avoid circular dependency
 def _get_notifier():
@@ -31,6 +35,11 @@ class ScheduledRetrainer:
 
     Integrates with APScheduler to run retraining on a configurable schedule.
     Logs results and auto-deploys models that show improvement.
+
+    Phase 18 additions:
+    - Degradation detection: periodic checks on production model health
+    - Walk-forward validation: multi-metric validation before deployment
+    - Auto-rollback: grace period monitoring with automatic rollback
     """
 
     def __init__(
@@ -41,7 +50,14 @@ class ScheduledRetrainer:
         hour: int = 2,
         auto_deploy: bool = True,
         min_improvement: float = 0.01,
-        enabled: bool = True
+        enabled: bool = True,
+        # Phase 18 parameters
+        degradation_check_enabled: bool = False,
+        degradation_check_interval_hours: int = 12,
+        auto_rollback_enabled: bool = False,
+        rollback_grace_period_days: int = 5,
+        use_walk_forward_validation: bool = False,
+        walk_forward_config: Optional[Dict] = None
     ):
         """
         Initialize the scheduled retrainer.
@@ -54,6 +70,12 @@ class ScheduledRetrainer:
             auto_deploy: Whether to auto-deploy improved models.
             min_improvement: Minimum accuracy improvement to deploy (default: 1%).
             enabled: Whether scheduled retraining is enabled.
+            degradation_check_enabled: Whether to run periodic degradation checks.
+            degradation_check_interval_hours: Hours between degradation checks.
+            auto_rollback_enabled: Whether to auto-rollback bad deployments.
+            rollback_grace_period_days: Days to monitor after deployment.
+            use_walk_forward_validation: Whether to validate before deployment.
+            walk_forward_config: Config dict for walk-forward validation parameters.
         """
         self.enabled = enabled
         self.schedule = schedule
@@ -61,6 +83,14 @@ class ScheduledRetrainer:
         self.hour = hour
         self.auto_deploy = auto_deploy
         self.min_improvement = min_improvement
+
+        # Phase 18 settings
+        self.degradation_check_enabled = degradation_check_enabled
+        self.degradation_check_interval_hours = degradation_check_interval_hours
+        self.auto_rollback_enabled = auto_rollback_enabled
+        self.rollback_grace_period_days = rollback_grace_period_days
+        self.use_walk_forward_validation = use_walk_forward_validation
+        self.walk_forward_config = walk_forward_config or {}
 
         # Load config for symbols if not provided
         config = Settings.load_trading_config()
@@ -77,11 +107,28 @@ class ScheduledRetrainer:
         # Initialize scheduler
         self.scheduler = BackgroundScheduler()
         self._is_running = False
+        self._is_retraining = False
+        self._retrain_lock = threading.Lock()
         self._last_retrain: Optional[datetime] = None
         self._last_result: Optional[Dict] = None
 
         # Retraining log file
         self.log_file = MODELS_DIR / "retraining_log.json"
+
+        # Phase 18: Initialize degradation monitor and rollback manager
+        self._degradation_monitor = None
+        self._rollback_manager = None
+
+        if self.degradation_check_enabled:
+            from src.ml.degradation_monitor import get_degradation_monitor
+            self._degradation_monitor = get_degradation_monitor(config)
+
+        if self.auto_rollback_enabled:
+            from src.ml.auto_rollback import AutoRollbackManager
+            self._rollback_manager = AutoRollbackManager(
+                grace_period_days=self.rollback_grace_period_days,
+                enabled=True
+            )
 
     def start(self) -> None:
         """Start the scheduler."""
@@ -104,6 +151,30 @@ class ScheduledRetrainer:
             name="Scheduled Model Retraining",
             replace_existing=True
         )
+
+        # Phase 18: Add degradation check job
+        if self.degradation_check_enabled and self._degradation_monitor:
+            self.scheduler.add_job(
+                self.run_degradation_check,
+                trigger=IntervalTrigger(hours=self.degradation_check_interval_hours),
+                id="degradation_check",
+                name="Model Degradation Check",
+                replace_existing=True
+            )
+            logger.info(
+                f"Degradation check enabled (every {self.degradation_check_interval_hours}h)"
+            )
+
+        # Phase 18: Add grace period check job (daily)
+        if self.auto_rollback_enabled and self._rollback_manager:
+            self.scheduler.add_job(
+                self.run_grace_period_check,
+                trigger=CronTrigger(hour=(self.hour + 1) % 24),
+                id="grace_period_check",
+                name="Grace Period Check",
+                replace_existing=True
+            )
+            logger.info("Auto-rollback grace period check enabled (daily)")
 
         self.scheduler.start()
         self._is_running = True
@@ -130,15 +201,32 @@ class ScheduledRetrainer:
             # Default to weekly
             return CronTrigger(day_of_week="sun", hour=2)
 
-    def run_retrain(self) -> Dict:
+    def run_retrain(self, trigger_reason: str = "scheduled") -> Dict:
         """
         Execute the retraining pipeline.
+
+        Args:
+            trigger_reason: Why retraining was triggered ("scheduled", "degradation", "manual").
 
         Returns:
             Dict with retraining results.
         """
+        # Prevent concurrent retraining
+        if not self._retrain_lock.acquire(blocking=False):
+            logger.warning("Retraining already in progress, skipping")
+            return {"skipped": True, "reason": "already_running"}
+
+        try:
+            self._is_retraining = True
+            return self._execute_retrain(trigger_reason)
+        finally:
+            self._is_retraining = False
+            self._retrain_lock.release()
+
+    def _execute_retrain(self, trigger_reason: str) -> Dict:
+        """Internal retraining execution."""
         logger.info("=" * 60)
-        logger.info("SCHEDULED RETRAINING STARTED")
+        logger.info(f"SCHEDULED RETRAINING STARTED (reason: {trigger_reason})")
         logger.info(f"Time: {datetime.now().isoformat()}")
         logger.info(f"Symbols: {', '.join(self.symbols)}")
         logger.info("=" * 60)
@@ -151,9 +239,11 @@ class ScheduledRetrainer:
         start_time = datetime.now()
         result = {
             "started_at": start_time.isoformat(),
+            "trigger_reason": trigger_reason,
             "symbols": self.symbols,
             "models": {},
             "deployments": {},
+            "walk_forward_validations": {},
             "errors": []
         }
 
@@ -193,11 +283,32 @@ class ScheduledRetrainer:
 
                 # Auto-deploy if enabled
                 if self.auto_deploy:
-                    deployed = self.pipeline.compare_and_deploy(
-                        model_type=model_type,
-                        new_version=version,
-                        production_name=production_names[model_type]
-                    )
+                    if self.use_walk_forward_validation:
+                        # Phase 18: Enhanced deployment with walk-forward validation
+                        deployed = self.pipeline.compare_and_deploy_enhanced(
+                            model_type=model_type,
+                            new_version=version,
+                            production_name=production_names[model_type],
+                            new_model=model_result.get("model"),
+                            X=model_result.get("X"),
+                            y=model_result.get("y"),
+                            use_walk_forward=True,
+                            walk_forward_config=self.walk_forward_config,
+                            auto_rollback_manager=self._rollback_manager
+                        )
+                    else:
+                        # Original deployment logic
+                        deployed = self.pipeline.compare_and_deploy(
+                            model_type=model_type,
+                            new_version=version,
+                            production_name=production_names[model_type]
+                        )
+                        # Register with rollback manager if enabled
+                        if deployed and self._rollback_manager:
+                            self._rollback_manager.register_deployment(
+                                model_type, version
+                            )
+
                     result["deployments"][model_type] = deployed
 
                     if deployed:
@@ -221,7 +332,7 @@ class ScheduledRetrainer:
         self._log_result(result)
 
         logger.info("=" * 60)
-        logger.info(f"SCHEDULED RETRAINING COMPLETED")
+        logger.info("SCHEDULED RETRAINING COMPLETED")
         logger.info(f"Duration: {result['duration_seconds']:.1f} seconds")
         logger.info(f"Deployments: {sum(result['deployments'].values())} / {len(result['models'])}")
         logger.info("=" * 60)
@@ -236,6 +347,75 @@ class ScheduledRetrainer:
             )
 
         return result
+
+    def run_degradation_check(self) -> Dict:
+        """
+        Run degradation checks on all production models.
+        If degradation detected, trigger proactive retraining or rollback.
+
+        Returns:
+            Dict with check results per model.
+        """
+        if not self._degradation_monitor:
+            return {}
+
+        logger.info("Running scheduled degradation check")
+        results = {}
+
+        try:
+            reports = self._degradation_monitor.check_all_models()
+
+            for model_type, report in reports.items():
+                results[model_type] = {
+                    "is_degraded": report.is_degraded,
+                    "recommendation": report.recommendation,
+                    "reasons": report.degradation_reasons
+                }
+
+                if report.is_degraded:
+                    self._handle_degradation(report)
+
+        except Exception as e:
+            logger.error(f"Degradation check failed: {e}")
+            results["error"] = str(e)
+
+        return results
+
+    def _handle_degradation(self, report) -> None:
+        """Handle a degradation report - trigger retraining or rollback."""
+        logger.warning(
+            f"Degradation detected for {report.model_type}: "
+            f"{', '.join(report.degradation_reasons)}"
+        )
+
+        if report.recommendation == "rollback" and self._rollback_manager:
+            # Model is in grace period - rollback
+            reason = f"Degradation during grace period: {'; '.join(report.degradation_reasons)}"
+            event = self._rollback_manager.rollback(report.model_type, reason=reason)
+            if event:
+                logger.info(
+                    f"Auto-rollback executed: {report.model_type} "
+                    f"restored to {event.restored_version}"
+                )
+                notifier = _get_notifier()
+                if notifier:
+                    notifier.notify_retraining(
+                        status="rollback",
+                        models={report.model_type: {"rolled_back": True}}
+                    )
+        elif report.recommendation == "retrain":
+            # Trigger proactive retraining
+            logger.info(f"Triggering proactive retraining for {report.model_type}")
+            if not self._is_retraining:
+                self.run_retrain(trigger_reason="degradation")
+
+    def run_grace_period_check(self) -> None:
+        """Check all models in grace periods and clear expired ones."""
+        if not self._rollback_manager:
+            return
+
+        logger.debug("Running grace period check")
+        self._rollback_manager.check_all_grace_periods()
 
     def _log_result(self, result: Dict) -> None:
         """Append result to retraining log file."""
@@ -272,13 +452,18 @@ class ScheduledRetrainer:
         status = {
             "enabled": self.enabled,
             "is_running": self._is_running,
+            "is_retraining": self._is_retraining,
             "schedule": self.schedule,
             "day_of_week": self.day_of_week if self.schedule == "weekly" else None,
             "hour": self.hour,
             "auto_deploy": self.auto_deploy,
             "min_improvement": self.min_improvement,
             "last_retrain": self._last_retrain.isoformat() if self._last_retrain else None,
-            "next_run": None
+            "next_run": None,
+            # Phase 18 status
+            "degradation_check_enabled": self.degradation_check_enabled,
+            "auto_rollback_enabled": self.auto_rollback_enabled,
+            "walk_forward_validation": self.use_walk_forward_validation
         }
 
         if self._is_running:
@@ -322,7 +507,7 @@ class ScheduledRetrainer:
             Retraining result.
         """
         logger.info("Manual retraining triggered")
-        return self.run_retrain()
+        return self.run_retrain(trigger_reason="manual")
 
 
 def get_scheduled_retrainer(config: Optional[Dict] = None) -> ScheduledRetrainer:
@@ -341,6 +526,11 @@ def get_scheduled_retrainer(config: Optional[Dict] = None) -> ScheduledRetrainer
     retraining_config = config.get("retraining", {})
     trading_config = config.get("trading", {})
 
+    # Phase 18 config sections
+    deg_config = retraining_config.get("degradation_detection", {})
+    rollback_config = retraining_config.get("auto_rollback", {})
+    wf_config = retraining_config.get("walk_forward_validation", {})
+
     return ScheduledRetrainer(
         symbols=trading_config.get("symbols"),
         schedule=retraining_config.get("schedule", "weekly"),
@@ -348,5 +538,12 @@ def get_scheduled_retrainer(config: Optional[Dict] = None) -> ScheduledRetrainer
         hour=retraining_config.get("hour", 2),
         auto_deploy=retraining_config.get("auto_deploy", True),
         min_improvement=retraining_config.get("min_improvement", 0.01),
-        enabled=retraining_config.get("enabled", True)
+        enabled=retraining_config.get("enabled", True),
+        # Phase 18
+        degradation_check_enabled=deg_config.get("enabled", False),
+        degradation_check_interval_hours=deg_config.get("check_interval_hours", 12),
+        auto_rollback_enabled=rollback_config.get("enabled", False),
+        rollback_grace_period_days=rollback_config.get("grace_period_days", 5),
+        use_walk_forward_validation=wf_config.get("enabled", False),
+        walk_forward_config=wf_config
     )
