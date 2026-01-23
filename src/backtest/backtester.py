@@ -859,7 +859,14 @@ class Backtester:
         model_params: Optional[Dict] = None,
         optimized_params_path: Optional[str] = None,
         use_regime: bool = False,
-        regime_mode: str = "adjust"
+        regime_mode: str = "adjust",
+        enable_stop_loss: bool = False,
+        enable_trailing_stop: bool = False,
+        enable_kelly: bool = False,
+        enable_circuit_breaker: bool = False,
+        trailing_atr_multiplier: float = 2.0,
+        circuit_breaker_threshold: float = 0.15,
+        circuit_breaker_recovery: float = 0.05,
     ) -> BacktestResult:
         """
         Walk-forward ML backtest with model retraining at each step.
@@ -1052,6 +1059,9 @@ class Backtester:
             # Generate signals on test window
             test_signals = []
             test_prices = {}
+            test_highs = {}
+            test_lows = {}
+            test_atr = {}
             for symbol, df in all_data.items():
                 test_df = df.loc[df.index.isin(test_dates)]
                 if len(test_df) < 1:
@@ -1101,6 +1111,13 @@ class Backtester:
                             })
 
                     test_prices[symbol] = test_prices_sym
+                    # Risk management data
+                    if 'high' in test_df.columns:
+                        test_highs[symbol] = test_df['high']
+                    if 'low' in test_df.columns:
+                        test_lows[symbol] = test_df['low']
+                    if 'atr_14' in test_df.columns:
+                        test_atr[symbol] = test_df['atr_14']
 
                 except Exception as e:
                     logger.debug(f"  Signal generation failed for {symbol}: {e}")
@@ -1112,7 +1129,15 @@ class Backtester:
             signals_df = pd.DataFrame(test_signals)
             window_result = self._simulate_portfolio_window(
                 signals_df, test_prices, confidence_threshold, max_positions, capital,
-                regime_series=regime_series, regime_mode=regime_mode
+                regime_series=regime_series, regime_mode=regime_mode,
+                highs=test_highs, lows=test_lows, atr=test_atr,
+                enable_stop_loss=enable_stop_loss,
+                enable_trailing_stop=enable_trailing_stop,
+                enable_kelly=enable_kelly,
+                enable_circuit_breaker=enable_circuit_breaker,
+                trailing_atr_multiplier=trailing_atr_multiplier,
+                circuit_breaker_threshold=circuit_breaker_threshold,
+                circuit_breaker_recovery=circuit_breaker_recovery,
             )
 
             capital = window_result.final_value
@@ -1223,7 +1248,17 @@ class Backtester:
         max_positions: int,
         starting_capital: float,
         regime_series: Optional[pd.Series] = None,
-        regime_mode: str = "adjust"
+        regime_mode: str = "adjust",
+        highs: Optional[Dict[str, pd.Series]] = None,
+        lows: Optional[Dict[str, pd.Series]] = None,
+        atr: Optional[Dict[str, pd.Series]] = None,
+        enable_stop_loss: bool = False,
+        enable_trailing_stop: bool = False,
+        enable_kelly: bool = False,
+        enable_circuit_breaker: bool = False,
+        trailing_atr_multiplier: float = 2.0,
+        circuit_breaker_threshold: float = 0.15,
+        circuit_breaker_recovery: float = 0.05,
     ) -> BacktestResult:
         """Simulate portfolio trading for a single window with custom starting capital."""
         from src.risk.regime_detector import MarketRegime, DEFAULT_REGIME_PARAMS
@@ -1233,12 +1268,20 @@ class Backtester:
         trades = []
         equity_history = []
 
+        # Risk management state
+        trailing_stops: Dict[str, float] = {}
+        peak_equity = starting_capital
+        circuit_breaker_active = False
+        completed_trades: list = []
+
         for date in sorted(signals_df["date"].unique()):
             day_signals = signals_df[signals_df["date"] == date]
 
             # Regime-adaptive parameters
             day_confidence = confidence_threshold
             day_size_mult = 1.0
+            day_stop_loss_pct = 0.05  # default
+            day_trailing_enabled = True
 
             if regime_series is not None:
                 regime = self._lookup_regime(regime_series, date)
@@ -1253,6 +1296,8 @@ class Backtester:
                     day_confidence = max(confidence_threshold, regime_params.min_confidence)
 
                 day_size_mult = regime_params.position_size_multiplier
+                day_stop_loss_pct = regime_params.stop_loss_pct
+                day_trailing_enabled = regime_params.trailing_stop_enabled
 
             # Current equity
             equity = capital
@@ -1261,7 +1306,79 @@ class Backtester:
                     equity += pos["shares"] * prices[sym].loc[date]
             equity_history.append({"date": date, "equity": equity})
 
-            # Exits
+            # Circuit breaker
+            if enable_circuit_breaker:
+                if equity > peak_equity:
+                    peak_equity = equity
+                current_dd = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0.0
+                if current_dd >= circuit_breaker_threshold:
+                    circuit_breaker_active = True
+                elif circuit_breaker_active and current_dd <= circuit_breaker_recovery:
+                    circuit_breaker_active = False
+
+            # Stop-loss exits (checked before signal exits)
+            if enable_stop_loss or enable_trailing_stop:
+                for sym in list(positions.keys()):
+                    pos = positions[sym]
+
+                    # Get daily high/low/atr
+                    day_low = lows[sym].loc[date] if (lows and sym in lows and date in lows[sym].index) else None
+                    day_high = highs[sym].loc[date] if (highs and sym in highs and date in highs[sym].index) else None
+                    day_atr = atr[sym].loc[date] if (atr and sym in atr and date in atr[sym].index) else None
+
+                    if day_low is None:
+                        sym_signal = day_signals[day_signals["symbol"] == sym]
+                        day_low = sym_signal.iloc[0]["price"] if not sym_signal.empty else None
+                    if day_low is None:
+                        continue
+
+                    # Fixed stop
+                    fixed_stop = None
+                    if enable_stop_loss:
+                        fixed_stop = pos["entry_price"] * (1 - day_stop_loss_pct)
+
+                    # Trailing stop (ATR-based)
+                    trail_stop = None
+                    if enable_trailing_stop and day_trailing_enabled and day_atr is not None and day_atr > 0:
+                        trail_distance = day_atr * trailing_atr_multiplier
+                        if sym not in trailing_stops:
+                            trailing_stops[sym] = pos["entry_price"] - trail_distance
+                        if day_high is not None:
+                            trailing_stops[sym] = max(trailing_stops[sym], day_high - trail_distance)
+                        trail_stop = trailing_stops[sym]
+
+                    # Use tighter (higher) stop
+                    effective_stop = None
+                    if fixed_stop is not None and trail_stop is not None:
+                        effective_stop = max(fixed_stop, trail_stop)
+                    elif fixed_stop is not None:
+                        effective_stop = fixed_stop
+                    elif trail_stop is not None:
+                        effective_stop = trail_stop
+
+                    # Check trigger
+                    if effective_stop is not None and day_low <= effective_stop:
+                        pos = positions.pop(sym)
+                        if sym in trailing_stops:
+                            del trailing_stops[sym]
+                        exit_price = min(effective_stop, day_low) if day_low < effective_stop else effective_stop
+                        proceeds = pos["shares"] * exit_price * (1 - self.commission - self.slippage)
+                        capital += proceeds
+                        trade_record = {
+                            "symbol": sym,
+                            "entry_date": pos["entry_date"],
+                            "entry_price": pos["entry_price"],
+                            "exit_date": date,
+                            "exit_price": exit_price,
+                            "shares": pos["shares"],
+                            "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
+                            "return": (exit_price - pos["entry_price"]) / pos["entry_price"],
+                            "exit_reason": "stop_loss"
+                        }
+                        trades.append(trade_record)
+                        completed_trades.append(trade_record)
+
+            # Signal-based exits
             for sym in list(positions.keys()):
                 sym_signal = day_signals[day_signals["symbol"] == sym]
                 if not sym_signal.empty:
@@ -1269,9 +1386,11 @@ class Backtester:
                     price = sym_signal.iloc[0]["price"]
                     if prob < (1 - day_confidence):
                         pos = positions.pop(sym)
+                        if sym in trailing_stops:
+                            del trailing_stops[sym]
                         proceeds = pos["shares"] * price * (1 - self.commission - self.slippage)
                         capital += proceeds
-                        trades.append({
+                        trade_record = {
                             "symbol": sym,
                             "entry_date": pos["entry_date"],
                             "entry_price": pos["entry_price"],
@@ -1279,11 +1398,14 @@ class Backtester:
                             "exit_price": price,
                             "shares": pos["shares"],
                             "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
-                            "return": (price - pos["entry_price"]) / pos["entry_price"]
-                        })
+                            "return": (price - pos["entry_price"]) / pos["entry_price"],
+                            "exit_reason": "signal"
+                        }
+                        trades.append(trade_record)
+                        completed_trades.append(trade_record)
 
-            # Entries
-            if len(positions) < max_positions:
+            # Entries (blocked if circuit breaker active)
+            if len(positions) < max_positions and not circuit_breaker_active:
                 candidates = day_signals[day_signals["prob_up"] > day_confidence]
                 candidates = candidates[~candidates["symbol"].isin(positions.keys())]
                 candidates = candidates.sort_values("prob_up", ascending=False)
@@ -1291,8 +1413,23 @@ class Backtester:
                 for _, row in candidates.iterrows():
                     if len(positions) >= max_positions:
                         break
-                    base_value = capital / (max_positions - len(positions) + 1) * 0.95
-                    position_value = base_value * day_size_mult
+
+                    # Position sizing: Kelly or default
+                    if enable_kelly and len(completed_trades) >= 10:
+                        recent = completed_trades[-20:]
+                        wins = [t for t in recent if t["return"] > 0]
+                        losses = [t for t in recent if t["return"] <= 0]
+                        win_rate = len(wins) / len(recent)
+                        avg_win = np.mean([t["return"] for t in wins]) if wins else 0.0
+                        avg_loss = abs(np.mean([t["return"] for t in losses])) if losses else 1.0
+                        win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 1.0
+                        kelly_f = win_rate - (1 - win_rate) / win_loss_ratio
+                        half_kelly = max(0.05, min(0.25, kelly_f / 2.0))
+                        position_value = equity * half_kelly * day_size_mult
+                    else:
+                        base_value = capital / (max_positions - len(positions) + 1) * 0.95
+                        position_value = base_value * day_size_mult
+
                     shares = int(position_value / row["price"])
                     if shares > 0:
                         cost = shares * row["price"] * (1 + self.commission + self.slippage)
@@ -1303,6 +1440,12 @@ class Backtester:
                                 "entry_price": row["price"],
                                 "entry_date": date
                             }
+                            # Initialize trailing stop
+                            if enable_trailing_stop and atr and row["symbol"] in atr:
+                                if date in atr[row["symbol"]].index:
+                                    entry_atr = atr[row["symbol"]].loc[date]
+                                    if entry_atr > 0:
+                                        trailing_stops[row["symbol"]] = row["price"] - (entry_atr * trailing_atr_multiplier)
 
         # Close remaining positions
         for sym, pos in positions.items():
@@ -1310,7 +1453,7 @@ class Backtester:
                 last_price = prices[sym].iloc[-1]
                 proceeds = pos["shares"] * last_price
                 capital += proceeds
-                trades.append({
+                trade_record = {
                     "symbol": sym,
                     "entry_date": pos["entry_date"],
                     "entry_price": pos["entry_price"],
@@ -1318,8 +1461,11 @@ class Backtester:
                     "exit_price": last_price,
                     "shares": pos["shares"],
                     "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
-                    "return": (last_price - pos["entry_price"]) / pos["entry_price"]
-                })
+                    "return": (last_price - pos["entry_price"]) / pos["entry_price"],
+                    "exit_reason": "window_end"
+                }
+                trades.append(trade_record)
+                completed_trades.append(trade_record)
 
         trades_df = pd.DataFrame(trades)
         equity_df = pd.DataFrame(equity_history).set_index("date")

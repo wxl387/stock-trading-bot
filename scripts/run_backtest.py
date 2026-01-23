@@ -47,6 +47,21 @@ def main():
     parser.add_argument("--regime-mode", type=str, default="adjust",
                         choices=["adjust", "filter"],
                         help="Regime mode: 'adjust' adapts params, 'filter' skips BEAR/CHOPPY")
+    # Risk management flags
+    parser.add_argument("--stop-loss", action="store_true",
+                        help="Enable fixed stop-loss (regime-based %%)")
+    parser.add_argument("--trailing-stop", action="store_true",
+                        help="Enable ATR-based trailing stops")
+    parser.add_argument("--kelly", action="store_true",
+                        help="Enable half-Kelly position sizing")
+    parser.add_argument("--circuit-breaker", action="store_true",
+                        help="Enable max drawdown circuit breaker")
+    parser.add_argument("--trailing-atr-mult", type=float, default=2.0,
+                        help="ATR multiplier for trailing stops (default: 2.0)")
+    parser.add_argument("--circuit-breaker-threshold", type=float, default=0.15,
+                        help="Drawdown %% to halt entries (default: 0.15)")
+    parser.add_argument("--circuit-breaker-recovery", type=float, default=0.05,
+                        help="Drawdown %% to resume entries (default: 0.05)")
 
     args = parser.parse_args()
 
@@ -65,6 +80,17 @@ def main():
         print(f"Model: {'ENSEMBLE (XGBoost+LSTM+CNN)' if args.ensemble else 'XGBoost'}")
     else:
         print(f"Model: {'ENSEMBLE (XGBoost+LSTM+CNN)' if args.ensemble else 'XGBoost'}")
+    risk_flags = []
+    if args.stop_loss:
+        risk_flags.append("stop-loss")
+    if args.trailing_stop:
+        risk_flags.append(f"trailing(ATR*{args.trailing_atr_mult})")
+    if args.kelly:
+        risk_flags.append("half-Kelly")
+    if args.circuit_breaker:
+        risk_flags.append(f"circuit-breaker({args.circuit_breaker_threshold:.0%})")
+    if risk_flags:
+        print(f"Risk Controls: {', '.join(risk_flags)}")
     print("=" * 60)
 
     # Import here to avoid slow startup
@@ -95,7 +121,14 @@ def main():
             use_ensemble=args.ensemble,
             optimized_params_path=args.use_optimized_params,
             use_regime=args.use_regime,
-            regime_mode=args.regime_mode
+            regime_mode=args.regime_mode,
+            enable_stop_loss=args.stop_loss,
+            enable_trailing_stop=args.trailing_stop,
+            enable_kelly=args.kelly,
+            enable_circuit_breaker=args.circuit_breaker,
+            trailing_atr_multiplier=args.trailing_atr_mult,
+            circuit_breaker_threshold=args.circuit_breaker_threshold,
+            circuit_breaker_recovery=args.circuit_breaker_recovery,
         )
 
         Backtester.print_results(result)
@@ -115,6 +148,13 @@ def main():
 
             print(f"\nBest Trade:  {result.trades['return'].max():.2%}")
             print(f"Worst Trade: {result.trades['return'].min():.2%}")
+
+            # Exit reason breakdown
+            if 'exit_reason' in result.trades.columns:
+                print("\nEXIT REASONS:")
+                for reason, count in result.trades['exit_reason'].value_counts().items():
+                    avg_ret = result.trades[result.trades['exit_reason'] == reason]['return'].mean()
+                    print(f"  {reason}: {count} trades (avg return: {avg_ret:.2%})")
 
     else:
         # Load pre-trained model

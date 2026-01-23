@@ -54,6 +54,17 @@ def main():
     parser.add_argument("--regime-mode", type=str, default="adjust",
                         choices=["adjust", "filter"],
                         help="Regime mode for optimization")
+    # Risk management flags
+    parser.add_argument("--stop-loss", action="store_true",
+                        help="Enable fixed stop-loss during optimization windows")
+    parser.add_argument("--trailing-stop", action="store_true",
+                        help="Enable ATR-based trailing stops during optimization")
+    parser.add_argument("--kelly", action="store_true",
+                        help="Enable half-Kelly position sizing during optimization")
+    parser.add_argument("--circuit-breaker", action="store_true",
+                        help="Enable max drawdown circuit breaker during optimization")
+    parser.add_argument("--trailing-atr-mult", type=float, default=2.0,
+                        help="ATR multiplier for trailing stops (default: 2.0)")
 
     args = parser.parse_args()
     symbols = [s.strip() for s in args.symbols.split(",")]
@@ -70,6 +81,17 @@ def main():
     print(f"Optimize features: {args.optimize_features}")
     if args.use_regime:
         print(f"Regime detection: ENABLED (mode={args.regime_mode})")
+    risk_flags = []
+    if args.stop_loss:
+        risk_flags.append("stop-loss")
+    if args.trailing_stop:
+        risk_flags.append(f"trailing(ATR*{args.trailing_atr_mult})")
+    if args.kelly:
+        risk_flags.append("half-Kelly")
+    if args.circuit_breaker:
+        risk_flags.append("circuit-breaker")
+    if risk_flags:
+        print(f"Risk Controls: {', '.join(risk_flags)}")
     print("=" * 60)
 
     from src.ml.walk_forward_optimizer import WalkForwardOptimizer
@@ -86,6 +108,11 @@ def main():
         optimize_features=args.optimize_features,
         use_regime=args.use_regime,
         regime_mode=args.regime_mode,
+        enable_stop_loss=args.stop_loss,
+        enable_trailing_stop=args.trailing_stop,
+        enable_kelly=args.kelly,
+        enable_circuit_breaker=args.circuit_breaker,
+        trailing_atr_multiplier=args.trailing_atr_mult,
     )
 
     # Run optimization
