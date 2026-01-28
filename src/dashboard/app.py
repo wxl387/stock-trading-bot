@@ -40,7 +40,7 @@ def main():
     # Navigation
     page = st.sidebar.selectbox(
         "Navigation",
-        ["Portfolio Overview", "Positions", "Trade History", "Analytics", "Backtest", "Settings"]
+        ["Portfolio Overview", "Positions", "Trade History", "Analytics", "Portfolio Optimization", "Backtest", "Settings"]
     )
 
     # Refresh button
@@ -64,6 +64,8 @@ def main():
         render_trade_history(data_provider)
     elif page == "Analytics":
         render_analytics(data_provider)
+    elif page == "Portfolio Optimization":
+        render_portfolio_optimization(data_provider)
     elif page == "Backtest":
         render_backtest()
     elif page == "Settings":
@@ -952,6 +954,161 @@ def render_settings():
     if st.button("Save Settings"):
         st.success("Settings saved successfully!")
         st.info("Note: Settings changes require bot restart to take effect.")
+
+
+def render_portfolio_optimization(data_provider):
+    """Render portfolio optimization page."""
+    st.title("Portfolio Optimization")
+
+    # Check if optimization is enabled
+    from config.settings import Settings
+    config = Settings.load_trading_config()
+    portfolio_config = config.get("portfolio_optimization", {})
+
+    if not portfolio_config.get("enabled", False):
+        st.warning("⚠️ Portfolio optimization is not enabled")
+        st.info("Enable it in `config/trading_config.yaml` by setting `portfolio_optimization.enabled: true`")
+
+        with st.expander("Configuration Example"):
+            st.code("""
+portfolio_optimization:
+  enabled: true
+  method: "max_sharpe"
+  lookback_days: 252
+  min_weight: 0.05
+  max_weight: 0.30
+  rebalancing:
+    enabled: true
+    drift_threshold: 0.10
+    frequency: "monthly"
+""", language="yaml")
+        return
+
+    # Optimization settings
+    st.subheader("⚙️ Optimization Settings")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Method", portfolio_config.get("method", "max_sharpe").replace("_", " ").title())
+    with col2:
+        st.metric("Lookback Period", f"{portfolio_config.get('lookback_days', 252)} days")
+    with col3:
+        rebalancing_config = portfolio_config.get("rebalancing", {})
+        rebalance_enabled = "Enabled" if rebalancing_config.get("enabled", True) else "Disabled"
+        st.metric("Rebalancing", rebalance_enabled)
+
+    # Display current vs target allocation
+    st.subheader("📊 Current vs Target Allocation")
+
+    # Note: In a full implementation, we'd fetch actual target weights from the trading engine
+    # For now, we show a placeholder that this feature is available when the bot is running
+    st.info("💡 Target weights are calculated dynamically when the trading bot is running with portfolio optimization enabled.")
+
+    # Show current positions
+    positions = data_provider.get_positions()
+    metrics = data_provider.get_portfolio_metrics()
+    portfolio_value = metrics.get('portfolio_value', 100000)
+
+    if not positions.empty:
+        # Calculate current weights
+        positions['value'] = positions['shares'] * positions['current_price']
+        positions['weight'] = positions['value'] / portfolio_value
+
+        # Create visualization
+        fig = go.Figure()
+
+        # Current allocation
+        fig.add_trace(go.Bar(
+            name='Current Allocation',
+            x=positions['symbol'],
+            y=positions['weight'] * 100,
+            marker_color='lightblue'
+        ))
+
+        fig.update_layout(
+            title="Current Portfolio Allocation",
+            xaxis_title="Symbol",
+            yaxis_title="Weight (%)",
+            yaxis_range=[0, max(40, positions['weight'].max() * 110)],
+            height=400
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Allocation table
+        st.dataframe(
+            positions[['symbol', 'shares', 'current_price', 'value', 'weight']]
+            .rename(columns={
+                'symbol': 'Symbol',
+                'shares': 'Shares',
+                'current_price': 'Price',
+                'value': 'Value',
+                'weight': 'Weight'
+            })
+            .style.format({
+                'Price': '${:.2f}',
+                'Value': '${:,.2f}',
+                'Weight': '{:.2%}'
+            }),
+            hide_index=True
+        )
+    else:
+        st.info("No positions currently held")
+
+    # Optimization metrics
+    st.subheader("📈 Optimization Metrics")
+    st.info("Optimization metrics (Sharpe ratio, expected return, volatility) are calculated and logged during trading cycles.")
+    st.markdown("""
+    **Available Metrics:**
+    - **Sharpe Ratio**: Risk-adjusted return measure
+    - **Expected Return**: Annualized expected return
+    - **Volatility**: Annualized portfolio volatility
+    - **Diversification Ratio**: Benefit from diversification (higher is better)
+    """)
+
+    # Rebalancing status
+    if rebalancing_config.get("enabled", True):
+        st.subheader("🔄 Rebalancing Status")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            drift_threshold = rebalancing_config.get("drift_threshold", 0.10)
+            st.metric("Drift Threshold", f"{drift_threshold:.1%}")
+        with col2:
+            frequency = rebalancing_config.get("frequency", "monthly")
+            st.metric("Rebalancing Frequency", frequency.title())
+
+        st.info("Rebalancing is triggered when portfolio drift exceeds the threshold OR on the scheduled frequency (combined mode).")
+
+    # Documentation
+    with st.expander("📚 How Portfolio Optimization Works"):
+        st.markdown("""
+        ### Portfolio Optimization Overview
+
+        The portfolio optimization module uses Modern Portfolio Theory to construct optimal portfolios:
+
+        1. **Data Collection**: Fetches historical returns for all symbols
+        2. **Optimization**: Calculates optimal weights using the selected method:
+           - **Max Sharpe**: Maximizes risk-adjusted returns (recommended)
+           - **Risk Parity**: Equal risk contribution from each asset
+           - **Minimum Variance**: Minimizes portfolio volatility
+           - **Equal Weight**: Baseline allocation (1/N for N assets)
+        3. **Signal Integration**: Optionally tilts weights based on ML signal confidence
+        4. **Rebalancing**: Periodically adjusts positions to maintain target allocation
+
+        ### Benefits
+        - ✅ Improved risk-adjusted returns (Sharpe ratio)
+        - ✅ Better diversification
+        - ✅ Systematic rebalancing discipline
+        - ✅ Integration with ML signals
+
+        ### Configuration
+        Edit `config/trading_config.yaml` to customize:
+        - Optimization method
+        - Weight constraints (min/max per asset)
+        - Rebalancing triggers and frequency
+        - Signal integration strength
+        """)
 
 
 if __name__ == "__main__":

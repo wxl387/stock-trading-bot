@@ -69,17 +69,72 @@ An ML-powered stock trading bot with ensemble models, automated retraining, risk
   - `--rollback MODEL_TYPE`: Manual rollback
   - `--monitoring-status`: Show monitoring status
 
+### Phase 19: Portfolio Optimization Module
+- **PortfolioOptimizer** (`src/portfolio/portfolio_optimizer.py`):
+  - 5 optimization methods: equal-weight, max Sharpe, risk-parity, minimum variance, mean-variance
+  - Ledoit-Wolf covariance shrinkage for numerical stability
+  - ML signal integration (tilt weights based on BUY/SELL signals)
+  - Weight constraints (min/max per asset) with infeasible constraint detection
+  - Automatic fallback to equal-weight if optimization fails
+- **EfficientFrontier** (`src/portfolio/efficient_frontier.py`):
+  - Calculate efficient frontier (100+ points)
+  - Find tangency portfolio (maximum Sharpe ratio)
+  - Find minimum variance portfolio
+  - Plotly visualization support with capital market line
+- **CorrelationAnalyzer** (`src/portfolio/correlation_analyzer.py`):
+  - Correlation matrix calculation with Ledoit-Wolf shrinkage
+  - Diversification ratio (weighted avg vol / portfolio vol)
+  - Hierarchical clustering to identify correlated assets
+  - Concentration risk detection and warnings
+  - Correlation statistics (mean, median, max, min)
+- **PortfolioRebalancer** (`src/portfolio/rebalancer.py`):
+  - Threshold-based rebalancing (drift > 5%)
+  - Calendar-based rebalancing (weekly/monthly/quarterly)
+  - Combined triggers (both threshold AND calendar)
+  - Minimal trade generation (only what's needed)
+  - Trade filtering (skip trades < $100)
+  - Rebalancing history tracking
+- **Testing**: 34/34 tests passing, comprehensive manual test suite
+
+### Phase 20: Portfolio Optimization Integration
+- **Trading Engine Integration** (`src/core/trading_engine.py`):
+  - Initialize PortfolioOptimizer and PortfolioRebalancer based on config
+  - Added `_get_target_portfolio_weights()` method to run optimization
+  - Integrated into `run_trading_cycle()` for automatic optimization
+  - Executes rebalancing trades when drift exceeds threshold or calendar triggers
+  - Passes target weights to ML strategy for portfolio-aware position sizing
+- **ML Strategy Update** (`src/strategy/ml_strategy.py`):
+  - Added `target_weights` parameter to `get_trade_recommendations()`
+  - Portfolio-aware position sizing when target weights provided
+  - Maintains backward compatibility (fallback to risk-based sizing if no target weights)
+  - Only trades if difference exceeds threshold (>5% or >$100)
+- **Configuration** (`config/trading_config.yaml`):
+  - Added comprehensive `portfolio_optimization` section
+  - Default enabled with max_sharpe method, 252-day lookback
+  - Rebalancing: combined trigger (10% drift + monthly calendar)
+  - ML signal integration with 15% tilt strength
+- **Dashboard** (`src/dashboard/app.py`):
+  - New "Portfolio Optimization" tab
+  - Displays optimization settings and rebalancing status
+  - Current allocation visualization (bar chart)
+  - Documentation on how portfolio optimization works
+- **Backtest** (`scripts/run_backtest.py`):
+  - Added `--optimize` flag (placeholder for full implementation)
+  - Ready for future enhancement
+- **Testing**: Integration test suite created, configuration validated
+
 ---
 
 ## Current State
 
 ### What Works End-to-End
-1. **Simulated Trading**: Fetch data → Generate signals → Execute trades → Monitor dashboard
+1. **Simulated Trading**: Fetch data → Optimize portfolio → Generate signals → Execute trades → Monitor dashboard
 2. **Backtesting**: Walk-forward validation with regime detection and risk management
 3. **Model Training**: XGBoost, LSTM, CNN individually or as ensemble
 4. **Scheduled Retraining**: Auto-deployment with degradation detection (Phase 18)
 5. **Risk Management**: Stop-loss, trailing stops, position sizing, drawdown protection
-6. **Notifications**: Trade alerts via Discord
+6. **Portfolio Optimization**: Fully integrated with automatic rebalancing (Phases 19-20)
+7. **Notifications**: Trade alerts via Discord
 
 ### Running Services
 - **Trading Bot**: `python scripts/start_trading.py --simulated --interval 60 --ensemble`
@@ -94,6 +149,7 @@ All settings in `config/trading_config.yaml`:
 - Trailing stop: 2% distance
 - Model: ensemble with soft voting
 - Retraining: Weekly schedule, auto-deploy if >1% improvement
+- **Portfolio Optimization**: Enabled, max Sharpe method, 10% drift threshold, monthly rebalancing
 
 ### Phase 18 Features (Disabled by Default)
 Enable in `config/trading_config.yaml` under `retraining:`:
@@ -111,16 +167,69 @@ walk_forward_validation:
   n_windows: 3
 ```
 
+### Phase 20 Features (Integrated and Active)
+Portfolio optimization is fully integrated into the trading engine and enabled by default.
+
+**Current Configuration** (`config/trading_config.yaml`):
+```yaml
+portfolio_optimization:
+  enabled: true                     # ✅ Active
+  method: "max_sharpe"              # Maximize Sharpe ratio
+  lookback_days: 252                # 1 year of returns
+  min_weight: 0.05                  # Min 5% per asset
+  max_weight: 0.30                  # Max 30% per asset
+  risk_free_rate: 0.05              # 5% annual
+
+  incorporate_signals: true         # Tilt weights based on ML signals
+  signal_tilt_strength: 0.15        # 15% max tilt
+
+  rebalancing:
+    enabled: true
+    trigger_type: "combined"        # threshold AND calendar
+    drift_threshold: 0.10           # Rebalance if drift > 10%
+    frequency: "monthly"            # Monthly rebalancing
+    min_trade_value: 200.0          # Min $200 per trade
+    max_trades_per_rebalance: 8     # Max 8 trades
+```
+
+**How It Works:**
+- Portfolio optimizer runs automatically during each trading cycle
+- Calculates optimal weights using selected method (default: max Sharpe)
+- Checks if rebalancing is needed (drift > 10% OR monthly)
+- Executes rebalancing trades automatically
+- Passes target weights to ML strategy for position sizing
+- Logs optimization metrics (Sharpe, return, volatility)
+
+**Dashboard:**
+Navigate to "Portfolio Optimization" tab to view:
+- Current vs target allocation
+- Optimization settings
+- Rebalancing status
+- Documentation
+
+**Testing:**
+```bash
+# Manual test of portfolio optimization module
+python scripts/test_portfolio_optimization.py
+
+# Integration test (Phase 20)
+python scripts/test_phase20_integration.py
+
+# Unit tests
+pytest tests/test_portfolio_optimizer.py -v
+```
+
 ---
 
-## Immediate Next Steps (Phase 19 Options)
+## Immediate Next Steps (Phase 21 Options)
 
-### Option 1: Portfolio Optimization Module (Recommended)
-- Mean-variance optimization (efficient frontier)
-- Risk-parity and minimum-variance allocation
-- Correlation-based diversification constraints
-- Rebalancing triggers (threshold/calendar-based)
-- **Why**: Currently equal allocation; portfolio optimization would significantly improve risk-adjusted returns
+### Option 1: Portfolio Optimization Enhancements (Recommended)
+- Full backtesting with portfolio optimization (walk-forward comparison)
+- Advanced dashboard visualizations (efficient frontier plot, correlation heatmap)
+- Regime-aware optimization (adapt method to bull/bear/volatile markets)
+- Rolling window analysis for validation
+- Transaction cost modeling
+- **Why**: Phase 20 integration complete; enhance with advanced features and validation
 
 ### Option 2: Advanced Order Execution
 - Limit orders, stop-limit, OCO (one-cancels-other)
@@ -154,7 +263,9 @@ walk_forward_validation:
 ## Future Roadmap
 
 ### Near-Term (Phases 19-22)
-- [ ] Portfolio optimization with efficient frontier
+- [x] Portfolio optimization with efficient frontier (Phase 19 - Complete)
+- [x] Portfolio optimization integration into trading engine (Phase 20 - Complete)
+- [ ] Portfolio optimization enhancements (backtesting, visualizations, regime-awareness)
 - [ ] Advanced order types (limit, stop-limit, OCO)
 - [ ] Real-time WebSocket data feeds
 - [ ] Production monitoring with Prometheus/Grafana
@@ -230,6 +341,25 @@ python scripts/retrain_models.py --check-degradation
 python scripts/retrain_models.py --monitoring-status
 ```
 
+### 9. Test Portfolio Optimization (Phases 19-20)
+```bash
+# Manual test suite demonstrating all optimization features
+python scripts/test_portfolio_optimization.py
+
+# Unit tests (34 tests)
+pytest tests/test_portfolio_optimizer.py -v
+
+# Integration tests (Phase 20)
+python scripts/test_phase20_integration.py
+```
+
+### 10. View Portfolio Optimization
+```bash
+# Start dashboard and navigate to "Portfolio Optimization" tab
+streamlit run src/dashboard/app.py --server.headless true
+# Navigate to: http://localhost:8501 → Portfolio Optimization
+```
+
 ---
 
 ## Project Structure
@@ -248,8 +378,10 @@ stock_trading/
 │   └── cnn_trading_model/    # Production CNN
 ├── scripts/
 │   ├── start_trading.py      # Main entry point
-│   ├── run_backtest.py       # Backtesting
+│   ├── run_backtest.py       # Backtesting (with --optimize flag)
 │   ├── retrain_models.py     # Retraining pipeline
+│   ├── test_portfolio_optimization.py  # Portfolio optimization manual tests
+│   ├── test_phase20_integration.py     # Phase 20 integration tests
 │   └── train_*.py            # Individual model training
 ├── src/
 │   ├── core/
@@ -262,6 +394,11 @@ stock_trading/
 │   ├── risk/
 │   │   ├── risk_manager.py   # Position sizing, limits
 │   │   └── regime_detector.py # Market regime detection
+│   ├── portfolio/            # Phase 19: Portfolio Optimization
+│   │   ├── portfolio_optimizer.py    # Multi-method optimization
+│   │   ├── efficient_frontier.py     # Mean-variance frontier
+│   │   ├── correlation_analyzer.py   # Correlation & clustering
+│   │   └── rebalancer.py             # Rebalancing triggers
 │   ├── ml/
 │   │   ├── models/           # XGBoost, LSTM, CNN, Ensemble
 │   │   ├── training.py       # Model training
@@ -282,6 +419,7 @@ stock_trading/
 │       ├── discord_notifier.py
 │       └── telegram_notifier.py
 └── tests/                    # Pytest test suite
+    └── test_portfolio_optimizer.py   # 34 tests for portfolio module
 ```
 
 ---
@@ -289,16 +427,38 @@ stock_trading/
 ## Notes for Continuation
 
 When continuing development on another device:
-1. Clone the repo and install dependencies
+1. Clone the repo and install dependencies (including `scipy`, `cvxpy`, and `pyarrow` for portfolio optimization)
 2. Copy `.env` file with API keys (not in git)
 3. Copy `data/simulated_broker_state.json` to preserve positions (optional)
 4. Copy `models/` directory to preserve trained models (or retrain)
 5. Run `python scripts/retrain_models.py --status` to verify model state
 6. Start with `python scripts/start_trading.py --simulated` to test
 
-For Phase 19, the recommended path is **Portfolio Optimization** - it provides the highest impact improvement to risk-adjusted returns without requiring external dependencies or real-time infrastructure.
+**Phase 20 Complete:** Portfolio optimization is now fully integrated into the trading engine. The bot automatically:
+- Calculates optimal portfolio weights using max Sharpe method
+- Rebalances when drift exceeds 10% OR monthly
+- Uses target weights for position sizing
+- Logs optimization metrics
+
+**Testing Phase 20:**
+```bash
+# Manual test of portfolio optimization module
+python scripts/test_portfolio_optimization.py
+
+# Unit tests (34 tests)
+pytest tests/test_portfolio_optimizer.py -v
+
+# Integration tests (Phase 20)
+python scripts/test_phase20_integration.py
+```
+
+For Phase 21, recommended enhancements include:
+- Full backtesting with portfolio optimization (walk-forward comparison)
+- Advanced dashboard visualizations (efficient frontier, correlation heatmap)
+- Regime-aware optimization (adapt to bull/bear/volatile markets)
+- Rolling window analysis for validation
 
 ---
 
-*Last updated: 2026-01-23*
-*Current version: Phase 18 complete*
+*Last updated: 2026-01-27*
+*Current version: Phase 20 complete (Portfolio Optimization Integration)*

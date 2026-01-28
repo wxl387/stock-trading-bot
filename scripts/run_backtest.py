@@ -62,6 +62,12 @@ def main():
                         help="Drawdown %% to halt entries (default: 0.15)")
     parser.add_argument("--circuit-breaker-recovery", type=float, default=0.05,
                         help="Drawdown %% to resume entries (default: 0.05)")
+    # Portfolio optimization
+    parser.add_argument("--optimize", action="store_true",
+                        help="Enable portfolio optimization (max Sharpe, rebalancing)")
+    parser.add_argument("--optimize-method", type=str, default="max_sharpe",
+                        choices=["equal_weight", "max_sharpe", "risk_parity", "minimum_variance"],
+                        help="Portfolio optimization method (default: max_sharpe)")
 
     args = parser.parse_args()
 
@@ -91,6 +97,9 @@ def main():
         risk_flags.append(f"circuit-breaker({args.circuit_breaker_threshold:.0%})")
     if risk_flags:
         print(f"Risk Controls: {', '.join(risk_flags)}")
+    if args.optimize:
+        print(f"Portfolio Optimization: ENABLED (method={args.optimize_method})")
+        print("  Note: Full portfolio optimization in backtest is planned for future release")
     print("=" * 60)
 
     # Import here to avoid slow startup

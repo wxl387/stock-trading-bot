@@ -15,6 +15,8 @@ from src.risk.risk_manager import RiskManager, StopLossType
 from src.risk.regime_detector import RegimeDetector, get_regime_detector, MarketRegime
 from src.ml.scheduled_retrainer import ScheduledRetrainer, get_scheduled_retrainer
 from src.notifications.notifier_manager import NotifierManager, get_notifier
+from src.portfolio.portfolio_optimizer import PortfolioOptimizer, OptimizationMethod
+from src.portfolio.rebalancer import PortfolioRebalancer, RebalanceTrigger
 
 # Optional import for WebullBroker (requires webull package)
 try:
@@ -94,6 +96,33 @@ class TradingEngine:
         if self.config.get("risk_management", {}).get("regime_detection", {}).get("enabled", True):
             self.regime_detector = get_regime_detector()
             logger.info("Market regime detection enabled")
+
+        # Initialize portfolio optimizer and rebalancer
+        self.portfolio_optimizer: Optional[PortfolioOptimizer] = None
+        self.portfolio_rebalancer: Optional[PortfolioRebalancer] = None
+        portfolio_config = self.config.get("portfolio_optimization", {})
+        if portfolio_config.get("enabled", False):
+            # Initialize optimizer
+            self.portfolio_optimizer = PortfolioOptimizer(
+                lookback_days=portfolio_config.get("lookback_days", 252),
+                min_weight=portfolio_config.get("min_weight", 0.0),
+                max_weight=portfolio_config.get("max_weight", 0.30),
+                risk_free_rate=portfolio_config.get("risk_free_rate", 0.05)
+            )
+            logger.info(f"Portfolio optimizer enabled: method={portfolio_config.get('method', 'max_sharpe')}")
+
+            # Initialize rebalancer if enabled
+            rebalancing_config = portfolio_config.get("rebalancing", {})
+            if rebalancing_config.get("enabled", True):
+                trigger_type = rebalancing_config.get("trigger_type", "combined")
+                self.portfolio_rebalancer = PortfolioRebalancer(
+                    drift_threshold=rebalancing_config.get("drift_threshold", 0.10),
+                    frequency=rebalancing_config.get("frequency", "monthly"),
+                    trigger_type=RebalanceTrigger[trigger_type.upper()],
+                    min_trade_value=rebalancing_config.get("min_trade_value", 200.0),
+                    max_trades=rebalancing_config.get("max_trades_per_rebalance", 8)
+                )
+                logger.info(f"Portfolio rebalancing enabled: trigger={trigger_type}, drift={rebalancing_config.get('drift_threshold', 0.10)}")
 
         logger.info(f"Trading Engine initialized with {len(symbols)} symbols")
         if simulated:
@@ -259,12 +288,75 @@ class TradingEngine:
                 if symbol in current_prices:
                     self.risk_manager.update_trailing_stop(symbol, current_prices[symbol])
 
+            # Portfolio optimization and rebalancing
+            target_weights = None
+            if self.portfolio_optimizer:
+                # Get target portfolio weights
+                target_weights = self._get_target_portfolio_weights()
+
+                # Check if rebalancing is needed
+                if target_weights and self.portfolio_rebalancer:
+                    rebalance_signal = self.portfolio_rebalancer.check_rebalance_needed(
+                        current_positions=positions,
+                        target_weights=target_weights,
+                        portfolio_value=account.portfolio_value,
+                        current_prices=current_prices
+                    )
+
+                    if rebalance_signal.should_rebalance:
+                        logger.info(f"Rebalancing triggered: {rebalance_signal.reason}")
+                        logger.info(f"  Drift: {rebalance_signal.drift_pct:.1%}, "
+                                   f"Trades needed: {len(rebalance_signal.trades_needed)}")
+
+                        # Execute rebalancing trades
+                        for trade in rebalance_signal.trades_needed:
+                            try:
+                                if trade.action == "BUY":
+                                    order = self.broker.place_order(
+                                        symbol=trade.symbol,
+                                        side=OrderSide.BUY,
+                                        quantity=trade.shares,
+                                        order_type=OrderType.MARKET
+                                    )
+                                else:  # SELL
+                                    order = self.broker.place_order(
+                                        symbol=trade.symbol,
+                                        side=OrderSide.SELL,
+                                        quantity=abs(trade.shares),
+                                        order_type=OrderType.MARKET
+                                    )
+
+                                if order:
+                                    logger.info(f"Rebalance trade: {trade.action} {trade.shares} {trade.symbol} @ ${trade.price:.2f}")
+                                    cycle_results["trades"].append({
+                                        "type": "REBALANCE",
+                                        "action": trade.action,
+                                        "symbol": trade.symbol,
+                                        "shares": abs(trade.shares),
+                                        "price": trade.price
+                                    })
+
+                                    # Send notification
+                                    if self.notifier:
+                                        self.notifier.notify_trade(
+                                            symbol=trade.symbol,
+                                            action=trade.action,
+                                            quantity=abs(trade.shares),
+                                            price=trade.price,
+                                            reason="Portfolio Rebalancing"
+                                        )
+
+                            except Exception as e:
+                                logger.error(f"Rebalance trade error for {trade.symbol}: {e}")
+                                cycle_results["errors"].append(f"Rebalance {trade.symbol}: {str(e)}")
+
             # Generate trading signals
             recommendations = self.strategy.get_trade_recommendations(
                 symbols=self.symbols,
                 portfolio_value=account.portfolio_value,
                 current_positions=current_positions,
-                risk_manager=self.risk_manager
+                risk_manager=self.risk_manager,
+                target_weights=target_weights  # Pass target weights to strategy
             )
 
             # Execute trades
@@ -444,6 +536,53 @@ class TradingEngine:
         # Remove stop-loss if fully exited
         if position.quantity - sell_qty <= 0:
             self.risk_manager.remove_stop_loss(symbol)
+
+    def _get_target_portfolio_weights(self, signals: Optional[Dict] = None) -> Optional[Dict[str, float]]:
+        """
+        Get target portfolio weights from optimizer.
+
+        Args:
+            signals: Optional ML trading signals for signal-based tilting
+
+        Returns:
+            Dictionary mapping symbols to target weights, or None if optimizer disabled
+        """
+        if not self.portfolio_optimizer:
+            return None
+
+        try:
+            portfolio_config = self.config.get("portfolio_optimization", {})
+            method_str = portfolio_config.get("method", "max_sharpe")
+
+            # Map string to OptimizationMethod enum
+            method_map = {
+                "equal_weight": OptimizationMethod.EQUAL_WEIGHT,
+                "max_sharpe": OptimizationMethod.MAX_SHARPE,
+                "risk_parity": OptimizationMethod.RISK_PARITY,
+                "minimum_variance": OptimizationMethod.MINIMUM_VARIANCE,
+                "mean_variance": OptimizationMethod.MEAN_VARIANCE
+            }
+            method = method_map.get(method_str, OptimizationMethod.MAX_SHARPE)
+
+            # Run optimization
+            weights = self.portfolio_optimizer.optimize(
+                symbols=self.symbols,
+                method=method,
+                signals=signals if portfolio_config.get("incorporate_signals", True) else None
+            )
+
+            if weights and weights.weights:
+                logger.info(f"Portfolio optimization: method={method_str}, "
+                           f"Sharpe={weights.sharpe_ratio:.3f}, "
+                           f"return={weights.expected_return:.2%}")
+                return weights.weights
+            else:
+                logger.warning("Portfolio optimization returned no weights")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error in portfolio optimization: {e}")
+            return None
 
     def _is_market_open(self) -> bool:
         """Check if market is currently open."""

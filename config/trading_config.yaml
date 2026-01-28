@@ -218,3 +218,50 @@ sentiment:
     - sentiment_dispersion
     - positive_ratio
     - news_intensity
+
+# Phase 20: Portfolio Optimization
+portfolio_optimization:
+  enabled: true                   # Enable portfolio optimization (Phase 20)
+
+  # Optimization method
+  method: "max_sharpe"            # max_sharpe, risk_parity, minimum_variance, equal_weight, mean_variance
+
+  # Historical data parameters
+  lookback_days: 252              # 1 year of returns for optimization (more stable estimates)
+  min_history_days: 60            # Minimum required history
+
+  # Weight constraints
+  min_weight: 0.05                # Minimum 5% per asset (avoid tiny positions)
+  max_weight: 0.30                # Maximum 30% per asset (allow concentration when justified)
+
+  # Risk parameters
+  risk_free_rate: 0.05            # 5% annual risk-free rate (for Sharpe calculation)
+  correlation_threshold: 0.70     # Warn if asset correlation > 0.7
+  max_cluster_exposure: 0.50      # Maximum 50% exposure to correlated asset cluster
+
+  # ML signal integration
+  incorporate_signals: true       # Tilt weights based on ML trading signals
+  signal_tilt_strength: 0.15      # Maximum 15% weight tilt based on signal confidence
+
+  # Rebalancing settings
+  rebalancing:
+    enabled: true                 # Enable automatic rebalancing
+    trigger_type: "combined"      # threshold, calendar, or combined (both must trigger)
+
+    # Threshold-based rebalancing
+    drift_threshold: 0.10         # Rebalance if any weight drifts > 10% from target
+
+    # Calendar-based rebalancing
+    frequency: "monthly"          # daily, weekly, monthly, or quarterly
+
+    # Trade filtering
+    min_trade_value: 200.0        # Minimum $200 per trade (avoid tiny orders)
+    max_trades_per_rebalance: 8   # Maximum 8 trades per rebalancing event
+
+    # Transaction costs
+    slippage_pct: 0.001           # 0.1% slippage assumption
+
+  # Advanced settings (optional)
+  covariance_method: "ledoit_wolf"  # ledoit_wolf, sample, or exponential
+  cache_ttl_hours: 4                # Cache correlation matrices for 4 hours
+  use_regime_aware: false           # Adapt optimization to market regime (future)

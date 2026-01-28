@@ -249,7 +249,8 @@ class MLStrategy:
         symbols: List[str],
         portfolio_value: float,
         current_positions: Dict[str, int],
-        risk_manager: RiskManager
+        risk_manager: RiskManager,
+        target_weights: Optional[Dict[str, float]] = None
     ) -> List[Dict]:
         """
         Get actionable trade recommendations.
@@ -259,6 +260,7 @@ class MLStrategy:
             portfolio_value: Total portfolio value.
             current_positions: Dict of symbol -> shares held.
             risk_manager: RiskManager instance.
+            target_weights: Optional target portfolio weights from optimizer.
 
         Returns:
             List of trade recommendation dictionaries.
@@ -266,44 +268,81 @@ class MLStrategy:
         signals = self.generate_signals(symbols)
         recommendations = []
 
+        # Portfolio-aware position sizing if target weights provided
+        use_portfolio_weights = target_weights is not None and len(target_weights) > 0
+
         for symbol, signal in signals.items():
             current_shares = current_positions.get(symbol, 0)
+            price = self.data_fetcher.get_latest_price(symbol)
 
-            if signal.signal == SignalType.BUY and current_shares == 0:
-                # New buy opportunity
-                price = self.data_fetcher.get_latest_price(symbol)
+            if use_portfolio_weights and symbol in target_weights:
+                # Portfolio optimization mode: use target weights
+                target_weight = target_weights[symbol]
+                target_value = portfolio_value * target_weight
+                target_shares = int(target_value / price) if price > 0 else 0
+                shares_diff = target_shares - current_shares
 
-                # Calculate position size
-                stop_loss_price = risk_manager.calculate_stop_loss(price)
-                shares = risk_manager.calculate_position_size(
-                    portfolio_value=portfolio_value,
-                    entry_price=price,
-                    stop_loss_price=stop_loss_price
-                )
+                # Only trade if difference is significant (>5% of target or >$100)
+                min_trade_shares = max(1, int(target_shares * 0.05))
+                min_trade_value = 100 / price if price > 0 else 1
 
-                if shares > 0:
+                if abs(shares_diff) >= max(min_trade_shares, min_trade_value):
+                    if shares_diff > 0:
+                        # Need to buy more shares
+                        stop_loss_price = risk_manager.calculate_stop_loss(price)
+                        recommendations.append({
+                            "action": "BUY",
+                            "symbol": symbol,
+                            "shares": shares_diff,
+                            "price": price,
+                            "stop_loss": stop_loss_price,
+                            "confidence": signal.confidence,
+                            "reason": f"Portfolio rebalance to {target_weight:.1%} (signal: {signal.confidence:.1%})"
+                        })
+                    else:
+                        # Need to sell shares
+                        recommendations.append({
+                            "action": "SELL",
+                            "symbol": symbol,
+                            "shares": abs(shares_diff),
+                            "price": price,
+                            "confidence": signal.confidence,
+                            "reason": f"Portfolio rebalance to {target_weight:.1%} (signal: {signal.confidence:.1%})"
+                        })
+
+            else:
+                # Traditional signal-based trading (original logic)
+                if signal.signal == SignalType.BUY and current_shares == 0:
+                    # New buy opportunity
+                    # Calculate position size
+                    stop_loss_price = risk_manager.calculate_stop_loss(price)
+                    shares = risk_manager.calculate_position_size(
+                        portfolio_value=portfolio_value,
+                        entry_price=price,
+                        stop_loss_price=stop_loss_price
+                    )
+
+                    if shares > 0:
+                        recommendations.append({
+                            "action": "BUY",
+                            "symbol": symbol,
+                            "shares": shares,
+                            "price": price,
+                            "stop_loss": stop_loss_price,
+                            "confidence": signal.confidence,
+                            "reason": f"ML signal: {signal.confidence:.1%} confidence"
+                        })
+
+                elif signal.signal == SignalType.SELL and current_shares > 0:
+                    # Sell existing position
                     recommendations.append({
-                        "action": "BUY",
+                        "action": "SELL",
                         "symbol": symbol,
-                        "shares": shares,
+                        "shares": current_shares,
                         "price": price,
-                        "stop_loss": stop_loss_price,
                         "confidence": signal.confidence,
-                        "reason": f"ML signal: {signal.confidence:.1%} confidence"
+                        "reason": f"ML sell signal: {signal.confidence:.1%} confidence"
                     })
-
-            elif signal.signal == SignalType.SELL and current_shares > 0:
-                # Sell existing position
-                price = self.data_fetcher.get_latest_price(symbol)
-
-                recommendations.append({
-                    "action": "SELL",
-                    "symbol": symbol,
-                    "shares": current_shares,
-                    "price": price,
-                    "confidence": signal.confidence,
-                    "reason": f"ML sell signal: {signal.confidence:.1%} confidence"
-                })
 
         # Sort by confidence (highest first)
         recommendations.sort(key=lambda x: x["confidence"], reverse=True)
