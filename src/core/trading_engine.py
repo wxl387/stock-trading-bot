@@ -552,6 +552,36 @@ class TradingEngine:
 
         try:
             portfolio_config = self.config.get("portfolio_optimization", {})
+            use_regime_aware = portfolio_config.get("regime_aware", False)
+
+            # Check if regime-aware optimization is enabled
+            if use_regime_aware and self.regime_detector:
+                # Detect current market regime
+                regime_status = self.regime_detector.get_status()
+                current_regime = regime_status.get("current_regime")
+
+                if current_regime:
+                    logger.info(f"Using regime-aware portfolio optimization: {current_regime}")
+
+                    # Run regime-aware optimization
+                    weights = self.portfolio_optimizer.optimize_regime_aware(
+                        symbols=self.symbols,
+                        market_regime=current_regime,
+                        signals=signals if portfolio_config.get("incorporate_signals", True) else None
+                    )
+
+                    if weights and weights.weights:
+                        logger.info(f"Regime-aware optimization ({current_regime.value}): "
+                                   f"method={weights.method.value}, "
+                                   f"Sharpe={weights.sharpe_ratio:.3f}, "
+                                   f"return={weights.expected_return:.2%}")
+                        return weights.weights
+                    else:
+                        logger.warning("Regime-aware optimization returned no weights, falling back to standard")
+                else:
+                    logger.warning("Could not detect market regime, using standard optimization")
+
+            # Standard optimization (no regime awareness)
             method_str = portfolio_config.get("method", "max_sharpe")
 
             # Map string to OptimizationMethod enum

@@ -187,6 +187,111 @@ class PortfolioOptimizer:
             logger.error(f"Optimization failed: {e}. Using equal-weight fallback.")
             return self._equal_weight_fallback(symbols)
 
+    def optimize_regime_aware(
+        self,
+        symbols: List[str],
+        market_regime: 'MarketRegime',
+        signals: Optional[Dict[str, 'TradingSignal']] = None,
+        constraints: Optional[Dict] = None
+    ) -> PortfolioWeights:
+        """
+        Regime-aware portfolio optimization: automatically select method based on market regime.
+
+        Optimization strategy by regime:
+        - BULL: Max Sharpe (aggressive growth)
+        - BEAR: Minimum Variance (defensive, capital preservation)
+        - CHOPPY: Risk Parity (balanced risk across assets)
+        - VOLATILE: Minimum Variance with cash buffer (defensive)
+
+        Args:
+            symbols: List of symbols to optimize
+            market_regime: Current market regime
+            signals: Optional ML signals to incorporate
+            constraints: Additional constraints
+
+        Returns:
+            PortfolioWeights with regime-appropriate allocation
+        """
+        try:
+            from src.risk.regime_detector import MarketRegime
+
+            # Select optimization method based on regime
+            regime_methods = {
+                MarketRegime.BULL: OptimizationMethod.MAX_SHARPE,
+                MarketRegime.BEAR: OptimizationMethod.MINIMUM_VARIANCE,
+                MarketRegime.CHOPPY: OptimizationMethod.RISK_PARITY,
+                MarketRegime.VOLATILE: OptimizationMethod.MINIMUM_VARIANCE
+            }
+
+            method = regime_methods.get(market_regime, OptimizationMethod.MAX_SHARPE)
+
+            logger.info(f"Regime-aware optimization: {market_regime.value} → {method.value}")
+
+            # Optimize with selected method
+            portfolio_weights = self.optimize(
+                symbols=symbols,
+                method=method,
+                signals=signals,
+                constraints=constraints
+            )
+
+            # Apply regime-specific adjustments
+            if market_regime == MarketRegime.VOLATILE:
+                # In volatile markets, add cash buffer by reducing all weights
+                cash_buffer = 0.15  # 15% cash allocation
+                adjusted_weights = {
+                    symbol: weight * (1.0 - cash_buffer)
+                    for symbol, weight in portfolio_weights.weights.items()
+                }
+                portfolio_weights.weights = adjusted_weights
+                portfolio_weights.metadata['cash_buffer'] = cash_buffer
+                portfolio_weights.metadata['regime_adjustment'] = 'volatile_cash_buffer'
+
+                logger.info(f"Applied {cash_buffer:.1%} cash buffer for volatile regime")
+
+            elif market_regime == MarketRegime.BEAR:
+                # In bear markets, reduce concentration (lower max weights)
+                max_position = 0.20  # Max 20% per position in bear market
+                adjusted_weights = {}
+                total_excess = 0.0
+
+                for symbol, weight in portfolio_weights.weights.items():
+                    if weight > max_position:
+                        adjusted_weights[symbol] = max_position
+                        total_excess += (weight - max_position)
+                    else:
+                        adjusted_weights[symbol] = weight
+
+                # Redistribute excess weight to underweight positions
+                if total_excess > 0:
+                    underweight_symbols = [
+                        s for s, w in adjusted_weights.items()
+                        if w < max_position
+                    ]
+                    if underweight_symbols:
+                        redistribution = total_excess / len(underweight_symbols)
+                        for symbol in underweight_symbols:
+                            adjusted_weights[symbol] = min(
+                                max_position,
+                                adjusted_weights[symbol] + redistribution
+                            )
+
+                portfolio_weights.weights = adjusted_weights
+                portfolio_weights.metadata['max_position_override'] = max_position
+                portfolio_weights.metadata['regime_adjustment'] = 'bear_concentration_limit'
+
+                logger.info(f"Applied {max_position:.1%} max position limit for bear regime")
+
+            # Add regime information to metadata
+            portfolio_weights.metadata['market_regime'] = market_regime.value
+            portfolio_weights.metadata['regime_aware'] = True
+
+            return portfolio_weights
+
+        except Exception as e:
+            logger.error(f"Regime-aware optimization failed: {e}. Using equal-weight fallback.")
+            return self._equal_weight_fallback(symbols)
+
     def equal_weight_optimize(self, symbols: List[str]) -> Dict[str, float]:
         """
         Equal-weight allocation (baseline).

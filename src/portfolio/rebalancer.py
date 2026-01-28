@@ -12,6 +12,8 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+from src.portfolio.transaction_costs import TransactionCostModel, TransactionCosts
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,11 +43,12 @@ class RebalanceSignal:
     target_weights: Dict[str, float]
     drift_pct: float
     trades_needed: List[Dict] = field(default_factory=list)
+    transaction_costs: Optional[TransactionCosts] = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> Dict:
         """Convert to dictionary."""
-        return {
+        result = {
             'should_rebalance': self.should_rebalance,
             'reason': self.reason,
             'current_weights': self.current_weights,
@@ -54,6 +57,19 @@ class RebalanceSignal:
             'trades_needed': self.trades_needed,
             'timestamp': self.timestamp.isoformat()
         }
+
+        if self.transaction_costs:
+            result['transaction_costs'] = {
+                'total_cost': self.transaction_costs.total_cost,
+                'total_cost_pct': self.transaction_costs.total_cost_pct,
+                'slippage_cost': self.transaction_costs.slippage_cost,
+                'market_impact_cost': self.transaction_costs.market_impact_cost,
+                'commission_cost': self.transaction_costs.commission_cost,
+                'expected_trades': self.transaction_costs.expected_trades,
+                'turnover_pct': self.transaction_costs.turnover_pct
+            }
+
+        return result
 
 
 class PortfolioRebalancer:
@@ -101,6 +117,14 @@ class PortfolioRebalancer:
         self.rebalance_slippage = rebalance_slippage
 
         self.last_rebalance: Optional[datetime] = None
+
+        # Initialize transaction cost model
+        self.cost_model = TransactionCostModel(
+            base_slippage_bps=rebalance_slippage * 10000,  # Convert to basis points
+            commission_per_trade=0.0,  # WeBull is commission-free
+            market_impact_factor=0.1,
+            min_trade_value=min_trade_value
+        )
 
         logger.info(f"Initialized PortfolioRebalancer: trigger={trigger_type.value}, "
                    f"drift_threshold={drift_threshold:.1%}, "
@@ -164,6 +188,8 @@ class PortfolioRebalancer:
 
             # Generate trades if rebalancing needed
             trades_needed = []
+            transaction_costs = None
+
             if should_rebalance:
                 # Get current prices
                 if current_prices is None:
@@ -179,18 +205,31 @@ class PortfolioRebalancer:
                     current_prices
                 )
 
+                # Estimate transaction costs
+                transaction_costs = self.cost_model.estimate_rebalancing_costs(
+                    current_weights=current_weights,
+                    target_weights=target_weights,
+                    portfolio_value=portfolio_value,
+                    current_prices=current_prices
+                )
+
             signal = RebalanceSignal(
                 should_rebalance=should_rebalance,
                 reason=reason,
                 current_weights=current_weights,
                 target_weights=target_weights,
                 drift_pct=drift,
-                trades_needed=trades_needed
+                trades_needed=trades_needed,
+                transaction_costs=transaction_costs
             )
 
             if should_rebalance:
                 logger.info(f"Rebalancing recommended: {reason}")
                 logger.info(f"  Drift: {drift:.2%}, Trades needed: {len(trades_needed)}")
+                if transaction_costs:
+                    logger.info(f"  Estimated costs: ${transaction_costs.total_cost:.2f} "
+                              f"({transaction_costs.total_cost_pct:.3%}), "
+                              f"Turnover: {transaction_costs.turnover_pct:.1f}%")
             else:
                 logger.debug(f"No rebalancing needed: drift={drift:.2%}, "
                            f"threshold={threshold_triggered}, calendar={calendar_triggered}")

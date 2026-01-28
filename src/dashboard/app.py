@@ -3,6 +3,7 @@ Streamlit dashboard for trading bot monitoring.
 """
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
@@ -984,6 +985,14 @@ portfolio_optimization:
 """, language="yaml")
         return
 
+    # Import required modules
+    try:
+        from src.portfolio.efficient_frontier import EfficientFrontier
+        from src.portfolio.correlation_analyzer import CorrelationAnalyzer
+    except ImportError as e:
+        st.error(f"Portfolio modules not available: {e}")
+        return
+
     # Optimization settings
     st.subheader("⚙️ Optimization Settings")
     col1, col2, col3 = st.columns(3)
@@ -1057,14 +1066,261 @@ portfolio_optimization:
 
     # Optimization metrics
     st.subheader("📈 Optimization Metrics")
-    st.info("Optimization metrics (Sharpe ratio, expected return, volatility) are calculated and logged during trading cycles.")
-    st.markdown("""
-    **Available Metrics:**
-    - **Sharpe Ratio**: Risk-adjusted return measure
-    - **Expected Return**: Annualized expected return
-    - **Volatility**: Annualized portfolio volatility
-    - **Diversification Ratio**: Benefit from diversification (higher is better)
-    """)
+
+    # Get trading symbols from config
+    symbols = config.get("symbols", ["AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "TSLA"])
+
+    # Try to calculate optimization metrics
+    try:
+        # Initialize analyzers
+        lookback_days = portfolio_config.get("lookback_days", 252)
+        risk_free_rate = portfolio_config.get("risk_free_rate", 0.05)
+        min_weight = portfolio_config.get("min_weight", 0.05)
+        max_weight = portfolio_config.get("max_weight", 0.30)
+
+        frontier_calculator = EfficientFrontier(
+            risk_free_rate=risk_free_rate,
+            use_shrinkage=True
+        )
+        correlation_analyzer = CorrelationAnalyzer(
+            lookback_days=lookback_days,
+            correlation_threshold=portfolio_config.get("correlation_threshold", 0.8)
+        )
+
+        # Fetch returns data
+        from src.data.data_fetcher import DataFetcher
+        data_fetcher = DataFetcher()
+
+        returns_data = {}
+        for symbol in symbols:
+            try:
+                df = data_fetcher.fetch_historical(symbol, period=f"{lookback_days + 30}d")
+                if df is not None and not df.empty:
+                    close_col = 'Close' if 'Close' in df.columns else 'close'
+                    if close_col in df.columns:
+                        returns = df[close_col].pct_change().dropna()
+                        returns_data[symbol] = returns
+            except Exception:
+                continue
+
+        if len(returns_data) >= 2:
+            returns_df = pd.DataFrame(returns_data).dropna()
+            if len(returns_df) > lookback_days:
+                returns_df = returns_df.tail(lookback_days)
+
+            # Calculate tangency portfolio (Max Sharpe)
+            tangency = frontier_calculator.find_tangency_portfolio(
+                returns_df, min_weight, max_weight
+            )
+
+            # Calculate minimum variance portfolio
+            min_var = frontier_calculator.find_minimum_variance_portfolio(
+                returns_df, min_weight, max_weight
+            )
+
+            # Display key metrics
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                sharpe = tangency.get('sharpe', 0) if tangency else 0
+                st.metric(
+                    "Max Sharpe Ratio",
+                    f"{sharpe:.2f}",
+                    help="Maximum achievable Sharpe ratio"
+                )
+
+            with col2:
+                exp_return = tangency.get('expected_return', 0) if tangency else 0
+                st.metric(
+                    "Expected Return",
+                    f"{exp_return:.1%}",
+                    help="Annualized expected return (tangency portfolio)"
+                )
+
+            with col3:
+                volatility = tangency.get('volatility', 0) if tangency else 0
+                st.metric(
+                    "Volatility",
+                    f"{volatility:.1%}",
+                    help="Annualized portfolio volatility (tangency portfolio)"
+                )
+
+            with col4:
+                # Calculate diversification ratio for current positions
+                if not positions.empty:
+                    current_weights = dict(zip(positions['symbol'], positions['weight']))
+                    div_ratio = correlation_analyzer.calculate_diversification_ratio(
+                        current_weights, returns_df
+                    )
+                else:
+                    div_ratio = 0
+                st.metric(
+                    "Diversification Ratio",
+                    f"{div_ratio:.2f}",
+                    help="Higher is better (1.0 = no diversification)"
+                )
+
+            st.divider()
+
+            # Efficient Frontier Visualization
+            st.subheader("🎯 Efficient Frontier")
+
+            with st.spinner("Calculating efficient frontier..."):
+                frontier_df = frontier_calculator.calculate_frontier(
+                    returns_df,
+                    num_points=100,
+                    min_weight=min_weight,
+                    max_weight=max_weight
+                )
+
+                if not frontier_df.empty:
+                    # Calculate current portfolio metrics if positions exist
+                    current_portfolio = None
+                    if not positions.empty:
+                        current_weights_dict = dict(zip(positions['symbol'], positions['weight']))
+                        # Calculate current portfolio stats
+                        mean_returns = returns_df.mean() * 252
+                        cov_matrix = returns_df.cov() * 252
+
+                        weights_array = np.array([current_weights_dict.get(s, 0) for s in returns_df.columns])
+                        current_return = np.dot(weights_array, mean_returns)
+                        current_vol = np.sqrt(np.dot(weights_array, np.dot(cov_matrix, weights_array)))
+
+                        current_portfolio = {
+                            'expected_return': current_return,
+                            'volatility': current_vol
+                        }
+
+                    # Plot efficient frontier
+                    fig = frontier_calculator.plot_frontier(
+                        frontier_df,
+                        current_portfolio=current_portfolio,
+                        tangency_portfolio=tangency,
+                        min_var_portfolio=min_var
+                    )
+
+                    if fig:
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # Show tangency portfolio weights
+                        if tangency and 'weights' in tangency:
+                            with st.expander("📊 Tangency Portfolio Weights (Max Sharpe)"):
+                                weights_df = pd.DataFrame([
+                                    {"Symbol": sym, "Weight": weight}
+                                    for sym, weight in tangency['weights'].items()
+                                    if weight > 0.001
+                                ]).sort_values("Weight", ascending=False)
+
+                                st.dataframe(
+                                    weights_df.style.format({"Weight": "{:.2%}"}),
+                                    hide_index=True
+                                )
+                else:
+                    st.warning("Could not calculate efficient frontier. Need more historical data.")
+
+            st.divider()
+
+            # Correlation Heatmap
+            st.subheader("🔗 Correlation Matrix")
+
+            corr_matrix = correlation_analyzer.calculate_correlation_matrix(
+                symbols, returns_df
+            )
+
+            if not corr_matrix.empty:
+                # Create heatmap
+                fig = go.Figure(data=go.Heatmap(
+                    z=corr_matrix.values,
+                    x=corr_matrix.columns,
+                    y=corr_matrix.index,
+                    colorscale='RdBu_r',
+                    zmid=0,
+                    zmin=-1,
+                    zmax=1,
+                    text=[[f"{v:.2f}" for v in row] for row in corr_matrix.values],
+                    texttemplate="%{text}",
+                    textfont={"size": 10},
+                    hovertemplate="<b>%{y} vs %{x}</b><br>Correlation: %{z:.3f}<extra></extra>",
+                    colorbar=dict(title="Correlation")
+                ))
+
+                fig.update_layout(
+                    title="Asset Correlation Matrix",
+                    xaxis_title="",
+                    yaxis_title="",
+                    height=500,
+                    width=600
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Correlation statistics
+                corr_stats = correlation_analyzer.get_correlation_stats(corr_matrix)
+
+                if corr_stats:
+                    col1, col2, col3, col4 = st.columns(4)
+
+                    with col1:
+                        st.metric(
+                            "Mean Correlation",
+                            f"{corr_stats.get('mean_correlation', 0):.2f}",
+                            help="Average pairwise correlation"
+                        )
+
+                    with col2:
+                        st.metric(
+                            "Max Correlation",
+                            f"{corr_stats.get('max_correlation', 0):.2f}",
+                            help="Highest correlation between any pair"
+                        )
+
+                    with col3:
+                        high_corr_pairs = corr_stats.get('n_high_correlation_pairs', 0)
+                        total_pairs = corr_stats.get('n_total_pairs', 1)
+                        st.metric(
+                            "High Correlation Pairs",
+                            f"{high_corr_pairs}/{total_pairs}",
+                            help=f"Pairs with |correlation| > {portfolio_config.get('correlation_threshold', 0.8)}"
+                        )
+
+                    with col4:
+                        # Find clusters
+                        clusters = correlation_analyzer.find_correlated_clusters(corr_matrix)
+                        st.metric(
+                            "Asset Clusters",
+                            f"{len(clusters)}",
+                            help="Number of correlated asset groups"
+                        )
+
+                # Show clusters
+                clusters = correlation_analyzer.find_correlated_clusters(corr_matrix)
+                if clusters:
+                    with st.expander("📦 Correlation Clusters"):
+                        for cluster_id, cluster_symbols in clusters.items():
+                            st.markdown(f"**Cluster {cluster_id + 1}:** {', '.join(cluster_symbols)}")
+
+                # Check concentration risk
+                if not positions.empty:
+                    current_weights = dict(zip(positions['symbol'], positions['weight']))
+                    concentration_check = correlation_analyzer.check_concentration_risk(
+                        current_weights, corr_matrix
+                    )
+
+                    if concentration_check.get('has_concentration_risk', False):
+                        st.warning("⚠️ **Concentration Risk Detected**")
+                        for warning in concentration_check.get('warnings', []):
+                            st.warning(f"• {warning}")
+        else:
+            st.info("Need at least 2 symbols with historical data to calculate optimization metrics.")
+
+    except Exception as e:
+        st.error(f"Error calculating optimization metrics: {e}")
+        st.markdown("""
+        **Metrics will be available when:**
+        - Portfolio optimization is enabled
+        - Historical data is available for symbols
+        - Trading bot is actively running
+        """)
 
     # Rebalancing status
     if rebalancing_config.get("enabled", True):
@@ -1079,6 +1335,83 @@ portfolio_optimization:
             st.metric("Rebalancing Frequency", frequency.title())
 
         st.info("Rebalancing is triggered when portfolio drift exceeds the threshold OR on the scheduled frequency (combined mode).")
+
+        # Transaction cost estimation
+        st.divider()
+        st.subheader("💰 Transaction Cost Estimate")
+
+        if not positions.empty:
+            try:
+                from src.portfolio.transaction_costs import TransactionCostModel
+
+                # Initialize cost model
+                slippage_bps = rebalancing_config.get("slippage_pct", 0.001) * 10000
+                cost_model = TransactionCostModel(
+                    base_slippage_bps=slippage_bps,
+                    commission_per_trade=0.0,
+                    min_trade_value=rebalancing_config.get("min_trade_value", 200.0)
+                )
+
+                # Get current and target weights (example: use portfolio optimization weights if available)
+                current_weights_dict = dict(zip(positions['symbol'], positions['weight']))
+
+                # For demonstration, calculate costs for current allocation
+                # In real scenario, this would use target weights from optimizer
+                costs = cost_model.estimate_rebalancing_costs(
+                    current_weights=current_weights_dict,
+                    target_weights=current_weights_dict,  # Same = no cost
+                    portfolio_value=portfolio_value
+                )
+
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric(
+                        "Estimated Total Cost",
+                        f"${costs.total_cost:.2f}",
+                        help="Total transaction cost for rebalancing"
+                    )
+
+                with col2:
+                    st.metric(
+                        "Cost %",
+                        f"{costs.total_cost_pct:.3%}",
+                        help="Cost as percentage of portfolio value"
+                    )
+
+                with col3:
+                    st.metric(
+                        "Expected Trades",
+                        f"{costs.expected_trades}",
+                        help="Number of trades needed for rebalancing"
+                    )
+
+                with col4:
+                    st.metric(
+                        "Portfolio Turnover",
+                        f"{costs.turnover_pct:.1f}%",
+                        help="Percentage of portfolio being traded"
+                    )
+
+                # Cost breakdown
+                with st.expander("💵 Cost Breakdown"):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Slippage Cost", f"${costs.slippage_cost:.2f}")
+                    with col2:
+                        st.metric("Market Impact", f"${costs.market_impact_cost:.2f}")
+                    with col3:
+                        st.metric("Commission", f"${costs.commission_cost:.2f}")
+
+                    st.markdown("""
+                    **Transaction Costs Include:**
+                    - **Slippage**: Difference between expected and actual execution price
+                    - **Market Impact**: Price movement caused by the trade itself
+                    - **Commission**: Trading fees (typically $0 for US stocks)
+                    """)
+
+            except Exception as e:
+                st.warning(f"Could not calculate transaction costs: {e}")
 
     # Documentation
     with st.expander("📚 How Portfolio Optimization Works"):

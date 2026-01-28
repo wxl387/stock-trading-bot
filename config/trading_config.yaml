@@ -264,4 +264,8 @@ portfolio_optimization:
   # Advanced settings (optional)
   covariance_method: "ledoit_wolf"  # ledoit_wolf, sample, or exponential
   cache_ttl_hours: 4                # Cache correlation matrices for 4 hours
-  use_regime_aware: false           # Adapt optimization to market regime (future)
+
+  # Phase 21: Regime-Aware Optimization
+  regime_aware: true                # Automatically adapt optimization method to market regime
+                                     # BULL → Max Sharpe, BEAR → Min Variance
+                                     # CHOPPY → Risk Parity, VOLATILE → Min Variance + cash buffer
