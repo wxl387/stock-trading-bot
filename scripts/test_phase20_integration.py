@@ -54,7 +54,7 @@ def test_trading_engine_initialization():
         if engine.portfolio_rebalancer is not None:
             print("✅ Portfolio rebalancer initialized successfully")
             print(f"   Drift threshold: {engine.portfolio_rebalancer.drift_threshold:.1%}")
-            print(f"   Frequency: {engine.portfolio_rebalancer.frequency}")
+            print(f"   Frequency: {engine.portfolio_rebalancer.calendar_frequency}")
         else:
             print("❌ Portfolio rebalancer not initialized")
             return False

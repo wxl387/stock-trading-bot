@@ -117,10 +117,10 @@ class TradingEngine:
                 trigger_type = rebalancing_config.get("trigger_type", "combined")
                 self.portfolio_rebalancer = PortfolioRebalancer(
                     drift_threshold=rebalancing_config.get("drift_threshold", 0.10),
-                    frequency=rebalancing_config.get("frequency", "monthly"),
+                    calendar_frequency=rebalancing_config.get("frequency", "monthly"),
                     trigger_type=RebalanceTrigger[trigger_type.upper()],
                     min_trade_value=rebalancing_config.get("min_trade_value", 200.0),
-                    max_trades=rebalancing_config.get("max_trades_per_rebalance", 8)
+                    max_trades_per_rebalance=rebalancing_config.get("max_trades_per_rebalance", 8)
                 )
                 logger.info(f"Portfolio rebalancing enabled: trigger={trigger_type}, drift={rebalancing_config.get('drift_threshold', 0.10)}")
 
