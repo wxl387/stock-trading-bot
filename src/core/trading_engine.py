@@ -296,8 +296,10 @@ class TradingEngine:
 
                 # Check if rebalancing is needed
                 if target_weights and self.portfolio_rebalancer:
+                    # Convert positions list to dict for rebalancer
+                    positions_dict = {p.symbol: p for p in positions}
                     rebalance_signal = self.portfolio_rebalancer.check_rebalance_needed(
-                        current_positions=positions,
+                        current_positions=positions_dict,
                         target_weights=target_weights,
                         portfolio_value=account.portfolio_value,
                         current_prices=current_prices

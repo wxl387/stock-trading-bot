@@ -1019,8 +1019,8 @@ portfolio_optimization:
     portfolio_value = metrics.get('portfolio_value', 100000)
 
     if not positions.empty:
-        # Calculate current weights
-        positions['value'] = positions['shares'] * positions['current_price']
+        # Calculate current weights (using correct column names from data_provider)
+        positions['value'] = positions['Shares'] * positions['Current Price']
         positions['weight'] = positions['value'] / portfolio_value
 
         # Create visualization
@@ -1029,7 +1029,7 @@ portfolio_optimization:
         # Current allocation
         fig.add_trace(go.Bar(
             name='Current Allocation',
-            x=positions['symbol'],
+            x=positions['Symbol'],
             y=positions['weight'] * 100,
             marker_color='lightblue'
         ))
@@ -1046,11 +1046,9 @@ portfolio_optimization:
 
         # Allocation table
         st.dataframe(
-            positions[['symbol', 'shares', 'current_price', 'value', 'weight']]
+            positions[['Symbol', 'Shares', 'Current Price', 'value', 'weight']]
             .rename(columns={
-                'symbol': 'Symbol',
-                'shares': 'Shares',
-                'current_price': 'Price',
+                'Current Price': 'Price',
                 'value': 'Value',
                 'weight': 'Weight'
             })

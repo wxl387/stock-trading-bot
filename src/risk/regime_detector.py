@@ -245,10 +245,12 @@ class RegimeDetector:
             fetcher = DataFetcher()
 
             # Use SPY as market proxy
-            df = fetcher.fetch_stock_data(
+            start = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            end = datetime.now().strftime("%Y-%m-%d")
+            df = fetcher.fetch_historical(
                 symbol="SPY",
-                start_date=datetime.now() - timedelta(days=365),
-                end_date=datetime.now()
+                start_date=start,
+                end_date=end
             )
 
             return df

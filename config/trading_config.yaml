@@ -79,19 +79,19 @@ risk_management:
       bull:
         stop_loss_pct: 0.05
         position_size_multiplier: 1.0
-        min_confidence: 0.55
+        min_confidence: 0.50      # Lowered from 0.55
       bear:
         stop_loss_pct: 0.03
         position_size_multiplier: 0.7
-        min_confidence: 0.60
+        min_confidence: 0.55      # Lowered from 0.60
       choppy:
         stop_loss_pct: 0.02
         position_size_multiplier: 0.5
-        min_confidence: 0.70
+        min_confidence: 0.58      # Lowered from 0.70 (was blocking most trades!)
       volatile:
         stop_loss_pct: 0.08
         position_size_multiplier: 0.5
-        min_confidence: 0.65
+        min_confidence: 0.55      # Lowered from 0.65
 
 ml_model:
   # Model selection
@@ -99,8 +99,8 @@ ml_model:
 
   # Prediction settings
   prediction_horizon: 5           # Days ahead to predict
-  confidence_threshold: 0.6       # Minimum confidence to trade
-  min_confidence_sell: 0.55       # Minimum confidence for SELL signal
+  confidence_threshold: 0.55      # Minimum confidence to trade (lowered from 0.60)
+  min_confidence_sell: 0.50       # Minimum confidence for SELL signal (lowered from 0.55)
 
   # Training settings
   train_window_days: 252          # 1 year of training data
@@ -246,17 +246,17 @@ portfolio_optimization:
   # Rebalancing settings
   rebalancing:
     enabled: true                 # Enable automatic rebalancing
-    trigger_type: "combined"      # threshold, calendar, or combined (both must trigger)
+    trigger_type: "threshold"     # Changed from "combined" - now triggers on drift alone
 
     # Threshold-based rebalancing
-    drift_threshold: 0.10         # Rebalance if any weight drifts > 10% from target
+    drift_threshold: 0.08         # Rebalance if any weight drifts > 8% from target (lowered from 10%)
 
     # Calendar-based rebalancing
-    frequency: "monthly"          # daily, weekly, monthly, or quarterly
+    frequency: "weekly"           # Changed from monthly to weekly for more activity
 
     # Trade filtering
-    min_trade_value: 200.0        # Minimum $200 per trade (avoid tiny orders)
-    max_trades_per_rebalance: 8   # Maximum 8 trades per rebalancing event
+    min_trade_value: 100.0        # Minimum $100 per trade (lowered from $200)
+    max_trades_per_rebalance: 10  # Maximum 10 trades per rebalancing event (increased from 8)
 
     # Transaction costs
     slippage_pct: 0.001           # 0.1% slippage assumption
@@ -269,3 +269,34 @@ portfolio_optimization:
   regime_aware: true                # Automatically adapt optimization method to market regime
                                      # BULL → Max Sharpe, BEAR → Min Variance
                                      # CHOPPY → Risk Parity, VOLATILE → Min Variance + cash buffer
+
+# Performance Reporting
+reporting:
+  # Daily reports
+  daily:
+    enabled: true                   # Generate daily performance reports
+    time: "17:00"                   # Report time (24-hour format, market close + 1 hour)
+
+  # Weekly reports
+  weekly:
+    enabled: true                   # Generate weekly performance reports
+    day: "monday"                   # Day of week (monday, tuesday, etc.)
+    time: "09:00"                   # Report time (24-hour format)
+
+  # Monthly reports
+  monthly:
+    enabled: false                  # Generate monthly performance reports
+    day: 1                          # Day of month (1-31)
+    time: "09:00"                   # Report time (24-hour format)
+
+  # Delivery methods
+  send_email: true                  # Send reports via email
+  send_discord: true                # Send reports via Discord
+  save_to_file: true                # Save reports to data/reports/ directory
+
+  # Email configuration (set in .env file)
+  # SMTP_SERVER=smtp.gmail.com
+  # SMTP_PORT=587
+  # SENDER_EMAIL=your_email@gmail.com
+  # SENDER_PASSWORD=your_app_password
+  # RECIPIENT_EMAILS=recipient1@example.com,recipient2@example.com
