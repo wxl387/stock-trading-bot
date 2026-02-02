@@ -257,7 +257,7 @@ class TradingEngine:
             current_regime = None
             if self.regime_detector:
                 current_regime = self.regime_detector.detect_regime()
-                cycle_results["regime"] = current_regime.value
+                cycle_results["regime"] = current_regime.value if hasattr(current_regime, 'value') else str(current_regime)
 
             # Get current prices and check stop losses
             quotes = self.broker.get_quotes(list(current_positions.keys()))
@@ -313,44 +313,50 @@ class TradingEngine:
                         # Execute rebalancing trades
                         for trade in rebalance_signal.trades_needed:
                             try:
-                                if trade.action == "BUY":
+                                # Handle both dict and object trades
+                                t_action = trade.get('action') if isinstance(trade, dict) else trade.action
+                                t_symbol = trade.get('symbol') if isinstance(trade, dict) else trade.symbol
+                                t_shares = trade.get('shares') if isinstance(trade, dict) else trade.shares
+                                t_price = trade.get('price', 0.0) if isinstance(trade, dict) else trade.price
+
+                                if t_action == "BUY":
                                     order = self.broker.place_order(
-                                        symbol=trade.symbol,
+                                        symbol=t_symbol,
                                         side=OrderSide.BUY,
-                                        quantity=trade.shares,
+                                        quantity=t_shares,
                                         order_type=OrderType.MARKET
                                     )
                                 else:  # SELL
                                     order = self.broker.place_order(
-                                        symbol=trade.symbol,
+                                        symbol=t_symbol,
                                         side=OrderSide.SELL,
-                                        quantity=abs(trade.shares),
+                                        quantity=abs(t_shares),
                                         order_type=OrderType.MARKET
                                     )
 
                                 if order:
-                                    logger.info(f"Rebalance trade: {trade.action} {trade.shares} {trade.symbol} @ ${trade.price:.2f}")
+                                    logger.info(f"Rebalance trade: {t_action} {t_shares} {t_symbol} @ ${t_price:.2f}")
                                     cycle_results["trades"].append({
                                         "type": "REBALANCE",
-                                        "action": trade.action,
-                                        "symbol": trade.symbol,
-                                        "shares": abs(trade.shares),
-                                        "price": trade.price
+                                        "action": t_action,
+                                        "symbol": t_symbol,
+                                        "shares": abs(t_shares),
+                                        "price": t_price
                                     })
 
                                     # Send notification
                                     if self.notifier:
                                         self.notifier.notify_trade(
-                                            symbol=trade.symbol,
-                                            action=trade.action,
-                                            quantity=abs(trade.shares),
-                                            price=trade.price,
+                                            symbol=t_symbol,
+                                            action=t_action,
+                                            quantity=abs(t_shares),
+                                            price=t_price,
                                             reason="Portfolio Rebalancing"
                                         )
 
                             except Exception as e:
-                                logger.error(f"Rebalance trade error for {trade.symbol}: {e}")
-                                cycle_results["errors"].append(f"Rebalance {trade.symbol}: {str(e)}")
+                                logger.error(f"Rebalance trade error for {t_symbol}: {e}")
+                                cycle_results["errors"].append(f"Rebalance {t_symbol}: {str(e)}")
 
             # Generate trading signals
             recommendations = self.strategy.get_trade_recommendations(
@@ -573,7 +579,8 @@ class TradingEngine:
                     )
 
                     if weights and weights.weights:
-                        logger.info(f"Regime-aware optimization ({current_regime.value}): "
+                        regime_str = current_regime.value if hasattr(current_regime, 'value') else str(current_regime)
+                        logger.info(f"Regime-aware optimization ({regime_str}): "
                                    f"method={weights.method.value}, "
                                    f"Sharpe={weights.sharpe_ratio:.3f}, "
                                    f"return={weights.expected_return:.2%}")
