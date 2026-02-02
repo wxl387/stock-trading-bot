@@ -69,14 +69,14 @@ class ModelTrainer:
                     logger.warning(f"No data for {symbol}, skipping")
                     continue
 
-                # Add features (including extended features for better accuracy)
+                # Add features (disable sentiment/macro until APIs are configured)
                 df = self.feature_engineer.add_all_features_extended(
                     df,
                     symbol=symbol,
-                    include_sentiment=True,
-                    include_macro=True,
+                    include_sentiment=False,  # Disabled: requires Finnhub API
+                    include_macro=False,      # Disabled: requires FRED API
                     include_cross_asset=True,
-                    include_interactions=True,
+                    include_interactions=False,  # Disabled: reduces feature count to prevent overfitting
                     include_lagged=True,
                     use_cache=True
                 )
@@ -118,7 +118,9 @@ class ModelTrainer:
     def train(
         self,
         X: Optional[pd.DataFrame] = None,
-        y: Optional[pd.Series] = None
+        y: Optional[pd.Series] = None,
+        use_feature_selection: bool = True,
+        top_n_features: int = 30
     ) -> Dict[str, float]:
         """
         Train the model.
@@ -126,6 +128,8 @@ class ModelTrainer:
         Args:
             X: Optional pre-prepared features.
             y: Optional pre-prepared labels.
+            use_feature_selection: Whether to select top features after initial training.
+            top_n_features: Number of top features to keep.
 
         Returns:
             Dictionary with training metrics.
@@ -149,8 +153,36 @@ class ModelTrainer:
             eval_set=(X_test, y_test)
         )
 
-        # Evaluate on test set
-        y_pred = self.model.predict(X_test)
+        # Feature selection: retrain with only top features
+        if use_feature_selection and len(X.columns) > top_n_features:
+            logger.info(f"Performing feature selection: keeping top {top_n_features} features")
+            importance = self.model.get_feature_importance(top_n=top_n_features)
+            important_features = importance['feature'].tolist()
+
+            # Filter to features that exist in the data
+            important_features = [f for f in important_features if f in X_train.columns]
+
+            if len(important_features) >= 10:  # Only select if we have enough features
+                X_train_selected = X_train[important_features]
+                X_test_selected = X_test[important_features]
+
+                # Retrain with selected features
+                self.model = XGBoostModel()
+                train_metrics = self.model.train(
+                    X_train_selected, y_train,
+                    eval_set=(X_test_selected, y_test)
+                )
+
+                logger.info(f"Retrained with {len(important_features)} selected features")
+
+                # Evaluate on test set with selected features
+                y_pred = self.model.predict(X_test_selected)
+            else:
+                y_pred = self.model.predict(X_test)
+        else:
+            # Evaluate on test set
+            y_pred = self.model.predict(X_test)
+
         test_metrics = self.model._calculate_metrics(y_test, y_pred)
 
         logger.info(f"Test Accuracy: {test_metrics['accuracy']:.4f}")

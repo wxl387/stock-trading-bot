@@ -25,15 +25,15 @@ class XGBoostModel:
 
     def __init__(
         self,
-        n_estimators: int = 100,
-        max_depth: int = 6,
-        learning_rate: float = 0.1,
+        n_estimators: int = 200,
+        max_depth: int = 8,
+        learning_rate: float = 0.05,
         subsample: float = 0.8,
         colsample_bytree: float = 0.8,
-        min_child_weight: int = 1,
-        gamma: float = 0.0,
-        reg_alpha: float = 0.0,
-        reg_lambda: float = 1.0,
+        min_child_weight: int = 5,
+        gamma: float = 1.0,
+        reg_alpha: float = 0.3,
+        reg_lambda: float = 1.5,
         random_state: int = 42
     ):
         """

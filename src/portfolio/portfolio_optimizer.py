@@ -205,7 +205,7 @@ class PortfolioOptimizer:
 
         Args:
             symbols: List of symbols to optimize
-            market_regime: Current market regime
+            market_regime: Current market regime (can be MarketRegime enum or string)
             signals: Optional ML signals to incorporate
             constraints: Additional constraints
 
@@ -214,6 +214,10 @@ class PortfolioOptimizer:
         """
         try:
             from src.risk.regime_detector import MarketRegime
+
+            # Convert string to enum if needed
+            if isinstance(market_regime, str):
+                market_regime = MarketRegime(market_regime)
 
             # Select optimization method based on regime
             regime_methods = {
