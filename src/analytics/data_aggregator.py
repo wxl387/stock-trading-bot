@@ -64,8 +64,8 @@ class DataAggregator:
         try:
             if self.data_provider:
                 history = self.data_provider.get_portfolio_history()
-                if history:
-                    df = pd.DataFrame(history)
+                if history is not None and not (isinstance(history, pd.DataFrame) and history.empty) and len(history) > 0:
+                    df = pd.DataFrame(history) if not isinstance(history, pd.DataFrame) else history
                     df['timestamp'] = pd.to_datetime(df['timestamp'])
                     df = df.set_index('timestamp').sort_index()
 
@@ -162,8 +162,8 @@ class DataAggregator:
         try:
             if self.data_provider:
                 trades = self.data_provider.get_trade_history()
-                if trades:
-                    df = pd.DataFrame(trades)
+                if trades is not None and not (isinstance(trades, pd.DataFrame) and trades.empty) and len(trades) > 0:
+                    df = pd.DataFrame(trades) if not isinstance(trades, pd.DataFrame) else trades
                     if 'timestamp' in df.columns:
                         df['timestamp'] = pd.to_datetime(df['timestamp'])
 
