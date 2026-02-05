@@ -309,7 +309,7 @@ dynamic_symbols:
   # Cooldown period
   cooldown_days: 30                 # Days before re-adding a removed symbol
 
-# Multi-Agent Collaboration System
+# Multi-Agent Collaboration System (4-Agent Architecture)
 agents:
   enabled: true                       # Enable AI-powered agents for monitoring and improvement
   use_llm: true                       # Use Claude API for intelligent analysis
@@ -317,31 +317,103 @@ agents:
   # LLM configuration
   llm_model: "claude-opus-4-5-20251101"  # Claude model for agent intelligence
 
-  # Stock Analyst Agent - monitors performance and suggests improvements
+  # ==========================================================================
+  # Market Intelligence Agent - Information gathering, news, macro analysis
+  # ==========================================================================
+  market_intelligence:
+    news_scan_hours: 1                # Scan news every 1 hour
+    earnings_check_hours: 4           # Check earnings every 4 hours
+    macro_analysis_hours: 6           # Run macro analysis every 6 hours
+    sector_analysis_time: "06:00"     # Sector analysis daily at 6 AM
+    news_sources:                     # News sources to monitor
+      - "finnhub"
+      - "bluesky"
+    alert_on_vix_spike: 25            # Alert when VIX exceeds this level
+
+  # ==========================================================================
+  # Risk Guardian Agent - Risk monitoring, protection, emergency actions
+  # ==========================================================================
+  risk_guardian:
+    risk_check_minutes: 30            # Run risk check every 30 minutes
+    drawdown_monitor_minutes: 15      # Monitor drawdown every 15 minutes
+    correlation_check_hours: 4        # Check correlations every 4 hours
+    daily_report_time: "16:00"        # Daily risk report at 4 PM
+
+    # Risk thresholds
+    thresholds:
+      drawdown_warning: 0.05          # Drawdown warning threshold (5%)
+      drawdown_critical: 0.10         # Drawdown critical threshold (10%)
+      position_warning: 0.12          # Max position warning (12%)
+      position_critical: 0.15         # Max position critical (15%)
+      sector_warning: 0.25            # Sector exposure warning (25%)
+      sector_critical: 0.35           # Sector exposure critical (35%)
+      daily_loss_warning: 0.03        # Daily loss warning (3%)
+      daily_loss_critical: 0.05       # Daily loss critical (5%)
+
+    # Emergency action settings
+    emergency_actions:
+      enabled: true                   # Enable emergency actions
+      auto_reduce_on_critical: true   # Auto-reduce positions on critical alerts
+      reduce_percentage: 0.25         # Reduce all positions by 25% on emergency
+
+  # ==========================================================================
+  # Portfolio Strategist Agent - Stock selection, allocation, rebalancing
+  # ==========================================================================
+  portfolio_strategist:
+    performance_review_hours: 4       # Review performance every 4 hours
+    rebalancing_check_time: "10:00"   # Check rebalancing daily at 10 AM
+    stock_screening_day: "sunday"     # Weekly stock screening day
+    stock_screening_time: "18:00"     # Stock screening time (6 PM)
+    portfolio_review_day: "monday"    # Weekly portfolio review day
+    portfolio_review_time: "09:00"    # Portfolio review time (9 AM)
+    min_score_to_add: 70              # Minimum screening score to add symbol
+    underperformance_threshold: -0.10 # Underperformance threshold (-10%)
+
+  # ==========================================================================
+  # Operations Agent - Execution, config changes, system health
+  # ==========================================================================
+  operations:
+    process_messages_minutes: 15      # Process messages every 15 minutes
+    execution_quality_hours: 2        # Check execution quality every 2 hours
+    system_health_hours: 4            # Check system health every 4 hours
+    degradation_check_hours: 12       # Check model degradation every 12 hours
+    cooldown_hours: 4                 # Cooldown between same action types
+    auto_retrain_on_degradation: true # Auto-retrain when models degrade
+
+  # ==========================================================================
+  # Legacy Agent Configuration (deprecated - for backward compatibility)
+  # ==========================================================================
+  # Stock Analyst Agent - replaced by Market Intelligence + Portfolio Strategist
   stock_analyst:
-    health_check_hours: 4             # Run health check every 4 hours
-    degradation_check_hours: 12       # Run degradation check every 12 hours
-    daily_review_time: "16:30"        # Daily review at 4:30 PM
-    sharpe_warning: 0.5               # Warn if Sharpe ratio below 0.5
-    drawdown_warning: 0.10            # Warn if drawdown exceeds 10%
-    win_rate_warning: 0.45            # Warn if win rate below 45%
-    accuracy_drop_threshold: 0.03     # Alert on 3% accuracy drop
-    # Dynamic symbols related schedules (only active if dynamic_symbols.enabled)
-    stock_screening_day: "sunday"     # Day for weekly stock screening
-    stock_screening_time: "18:00"     # Time for screening (24h format)
-    portfolio_review_hours: 24        # Run portfolio review every 24 hours
-    market_analysis_hours: 4          # Run market timing analysis every 4 hours
+    health_check_hours: 4
+    degradation_check_hours: 12
+    daily_review_time: "16:30"
+    sharpe_warning: 0.5
+    drawdown_warning: 0.10
+    win_rate_warning: 0.45
+    accuracy_drop_threshold: 0.03
+    stock_screening_day: "sunday"
+    stock_screening_time: "18:00"
+    portfolio_review_hours: 24
+    market_analysis_hours: 4
 
-  # Developer Agent - implements changes automatically
+  # Developer Agent - replaced by Operations Agent
   developer:
-    auto_retrain_on_degradation: true # Automatically retrain when models degrade
-    auto_adjust_confidence: true      # Automatically adjust confidence threshold
-    cooldown_hours: 4                 # Hours between same action type
-    process_interval_minutes: 30      # Check for messages every 30 minutes
+    auto_retrain_on_degradation: true
+    auto_adjust_confidence: true
+    cooldown_hours: 4
+    process_interval_minutes: 30
 
+  # ==========================================================================
   # Discord notification settings for agent conversations
+  # ==========================================================================
   notifications:
     discord_enabled: true             # Send agent messages to Discord
+    colors:                           # Embed colors for each agent
+      market_intelligence: 0x3498DB   # Blue - News/macro data
+      risk_guardian: 0xE74C3C         # Red - Risk alerts
+      portfolio_strategist: 0x2ECC71  # Green - Portfolio decisions
+      operations: 0x9B59B6            # Purple - System operations
 
 # Performance Reporting
 reporting:

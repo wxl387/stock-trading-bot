@@ -20,8 +20,15 @@ if TYPE_CHECKING:
 
 class AgentRole(Enum):
     """Defines the roles of agents in the system."""
+    # Legacy roles (deprecated - kept for backward compatibility)
     STOCK_ANALYST = "stock_analyst"
     DEVELOPER = "developer"
+
+    # New 4-agent system roles
+    MARKET_INTELLIGENCE = "market_intelligence"
+    RISK_GUARDIAN = "risk_guardian"
+    PORTFOLIO_STRATEGIST = "portfolio_strategist"
+    OPERATIONS = "operations"
 
 
 class MessagePriority(Enum):

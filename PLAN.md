@@ -825,13 +825,137 @@ Subject: Action: Triggered Retraining
 
 ---
 
+## Phase 25: 4-Agent Trading System (COMPLETE)
+
+### Overview
+Replaced the 2-agent system (Stock Analyst + Developer) with a comprehensive 4-agent architecture for specialized responsibilities and better coordination.
+
+### New 4-Agent Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Agent Orchestrator                          │
+│                  (APScheduler coordination)                      │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+        ▼                   ▼                   ▼
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│     Market       │ │    Portfolio     │ │   Operations     │
+│  Intelligence    │ │   Strategist     │ │                  │
+│                  │ │                  │ │ - Config changes │
+│ - News/Events    │ │ - Stock screen   │ │ - Retraining     │
+│ - Macro data     │ │ - Allocation     │ │ - Execution QA   │
+│ - Sector trends  │ │ - Rebalancing    │ │ - System health  │
+└────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
+         │                    │                    │
+         │                    ▼                    │
+         │           ┌──────────────────┐          │
+         └──────────▶│   Risk Guardian  │◀─────────┘
+                     │                  │
+                     │ - Portfolio risk │
+                     │ - Drawdown alert │
+                     │ - Position limits│
+                     │ - EMERGENCY STOP │
+                     └──────────────────┘
+```
+
+### Agent Responsibilities
+
+| Agent | Role | Key Tasks |
+|-------|------|-----------|
+| **Market Intelligence** | Information Gathering | News scanning (1h), earnings checks (4h), macro analysis (6h), sector analysis (daily 6 AM) |
+| **Risk Guardian** | Risk Protection | Risk checks (30min), drawdown monitoring (15min), correlation analysis (4h), daily report (4 PM) |
+| **Portfolio Strategist** | Portfolio Management | Performance review (4h), rebalancing (daily 10 AM), stock screening (weekly Sunday 6 PM), portfolio review (weekly Monday 9 AM) |
+| **Operations** | Execution & System | Message processing (15min), execution quality (2h), system health (4h), degradation checks (12h) |
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `src/agents/market_intelligence.py` | News, earnings, macro, sector analysis |
+| `src/agents/risk_guardian.py` | Risk monitoring, drawdown protection, emergency actions |
+| `src/agents/portfolio_strategist.py` | Stock screening, rebalancing, performance review |
+| `src/agents/operations_agent.py` | Config changes, system health, execution quality |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/agents/base_agent.py` | Added 4 new AgentRole enum values |
+| `src/agents/agent_notifier.py` | Added Discord colors for new agents |
+| `src/agents/llm_client.py` | Added 12 new LLM analysis methods |
+| `src/agents/orchestrator.py` | Rewrote for 4-agent coordination |
+| `src/agents/__init__.py` | Updated exports for new agents |
+| `config/trading_config.yaml` | Added configuration for all 4 agents |
+
+### Discord Notification Colors
+
+| Agent | Color | Hex |
+|-------|-------|-----|
+| Market Intelligence | Blue | 0x3498DB |
+| Risk Guardian | Red | 0xE74C3C |
+| Portfolio Strategist | Green | 0x2ECC71 |
+| Operations | Purple | 0x9B59B6 |
+
+### Risk Guardian Emergency Actions
+
+- Reduce all positions by configurable percentage
+- Close highest-risk positions
+- Halt all new trades
+- Alert all agents of emergency state
+
+### Configuration
+
+```yaml
+agents:
+  enabled: true
+  use_llm: true
+  llm_model: "claude-opus-4-5-20251101"
+
+  market_intelligence:
+    news_scan_hours: 1
+    earnings_check_hours: 4
+    macro_analysis_hours: 6
+    sector_analysis_time: "06:00"
+
+  risk_guardian:
+    risk_check_minutes: 30
+    drawdown_monitor_minutes: 15
+    correlation_check_hours: 4
+    daily_report_time: "16:00"
+    thresholds:
+      drawdown_warning: 0.05
+      drawdown_critical: 0.10
+
+  portfolio_strategist:
+    performance_review_hours: 4
+    rebalancing_check_time: "10:00"
+    stock_screening_day: "sunday"
+    portfolio_review_day: "monday"
+
+  operations:
+    process_messages_minutes: 15
+    execution_quality_hours: 2
+    system_health_hours: 4
+    cooldown_hours: 4
+```
+
+### Backward Compatibility
+
+Legacy agents (StockAnalystAgent, DeveloperAgent) kept for backward compatibility but deprecated.
+
+---
+
 *Last updated: 2026-02-04*
-*Current version: Phase 24 complete (Dynamic AI-Driven Stock Selection)*
+*Current version: Phase 25 complete (4-Agent Trading System)*
 *Phase 20: Portfolio Optimization Integration (validated)*
 *Phase 21: Advanced visualizations, regime-aware optimization, transaction costs (validated)*
 *Phase 22 Prep: Automated performance reporting, configuration tuning for active trading*
 *Phase 23: Multi-Agent Collaboration System with Claude API integration (complete)*
-*Phase 24: Dynamic AI-Driven Stock Selection System (COMPLETE)*
+*Phase 24: Dynamic AI-Driven Stock Selection System (complete)*
+*Phase 25: 4-Agent Trading System Architecture (COMPLETE)*
 *Next: Phase 22 - Production Deployment (Paper Trading with WebBull)*
 
 ---

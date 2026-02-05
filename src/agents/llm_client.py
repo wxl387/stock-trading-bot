@@ -433,6 +433,506 @@ Be measured - avoid recommending dramatic changes unless clearly warranted."""
 
         return self.generate(prompt, system_prompt=system_prompt, max_tokens=1000)
 
+    # ============================================================
+    # Market Intelligence Agent Methods
+    # ============================================================
+
+    def analyze_news_impact(
+        self,
+        news_items: List[Dict[str, Any]],
+        portfolio_symbols: List[str]
+    ) -> Optional[str]:
+        """
+        Analyze news impact on portfolio.
+
+        Args:
+            news_items: List of news items with sentiment
+            portfolio_symbols: Current portfolio symbols
+
+        Returns:
+            Analysis of news impact
+        """
+        system_prompt = """You are a financial news analyst AI assistant.
+Your role is to assess how breaking news affects a trading portfolio.
+Focus on material impact, not noise. Be concise and actionable."""
+
+        news_summary = "\n".join([
+            f"- {n.get('symbol', 'N/A')}: {n.get('headline', '')[:80]} (sentiment: {n.get('sentiment_score', 0):+.2f})"
+            for n in news_items[:15]
+        ])
+
+        prompt = f"""Analyze these news items for portfolio impact:
+
+## Portfolio Symbols
+{', '.join(portfolio_symbols)}
+
+## Recent News
+{news_summary}
+
+Provide:
+1. **Most Impactful News** - Top 3 items that could materially affect positions
+2. **Risk Assessment** - Any immediate risks to monitor
+3. **Recommended Actions** - Specific steps (if any)
+
+Be brief and focus on actionable insights."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=800)
+
+    def analyze_macro_environment(
+        self,
+        macro_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Analyze macro economic environment.
+
+        Args:
+            macro_data: Macro economic indicators
+
+        Returns:
+            Macro environment analysis
+        """
+        system_prompt = """You are a macro economic analyst AI assistant.
+Your role is to assess overall market conditions and their trading implications.
+Be data-driven and specific about risks and opportunities."""
+
+        data_str = self._format_metrics(macro_data)
+
+        prompt = f"""Analyze the current macro environment:
+
+## Macro Indicators
+{data_str}
+
+Provide:
+1. **Overall Assessment** - Market environment in 2-3 sentences
+2. **Key Risks** - Top 3 macro risks to monitor
+3. **Opportunities** - Any favorable conditions
+4. **Trading Implications** - How this should affect portfolio management
+
+Keep analysis concise and actionable."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=800)
+
+    def detect_sector_rotation(
+        self,
+        sector_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Detect sector rotation patterns.
+
+        Args:
+            sector_data: Sector performance data
+
+        Returns:
+            Sector rotation analysis
+        """
+        system_prompt = """You are a sector rotation analyst AI assistant.
+Your role is to identify sector trends and rotation patterns.
+Focus on actionable sector allocation insights."""
+
+        sector_str = "\n".join([
+            f"- {sector}: 1D={data.get('change_1d', 0):+.1f}%, 1M={data.get('change_1m', 0):+.1f}%"
+            for sector, data in sector_data.items()
+        ])
+
+        prompt = f"""Analyze sector rotation patterns:
+
+## Sector Performance
+{sector_str}
+
+Provide:
+1. **Rotation Pattern** - What rotation (if any) is occurring
+2. **Leading Sectors** - Which sectors to favor
+3. **Lagging Sectors** - Which sectors to avoid
+4. **Recommended Tilts** - Specific allocation adjustments
+
+Be specific about sector names and percentage tilts."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=800)
+
+    # ============================================================
+    # Risk Guardian Agent Methods
+    # ============================================================
+
+    def assess_portfolio_risk(
+        self,
+        risk_metrics: Dict[str, Any],
+        positions: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """
+        Assess overall portfolio risk.
+
+        Args:
+            risk_metrics: Risk metrics dictionary
+            positions: Current positions
+
+        Returns:
+            Risk assessment
+        """
+        system_prompt = """You are a portfolio risk management AI assistant.
+Your role is to assess portfolio risk and recommend protective actions.
+Be conservative - err on the side of caution with risk."""
+
+        metrics_str = self._format_metrics(risk_metrics)
+        positions_str = self._format_holdings(positions) if positions else "No positions"
+
+        prompt = f"""Assess portfolio risk:
+
+## Risk Metrics
+{metrics_str}
+
+## Current Positions
+{positions_str}
+
+Provide:
+1. **Risk Level** - Overall risk assessment (Low/Medium/High/Critical)
+2. **Key Concerns** - Top 3 risk factors
+3. **Protective Actions** - Specific risk reduction steps
+4. **Position-Level Risks** - Any individual position concerns
+
+Be specific about thresholds and recommended actions."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=1000)
+
+    def recommend_risk_action(
+        self,
+        risk_state: Dict[str, Any],
+        thresholds: Dict[str, float]
+    ) -> Optional[str]:
+        """
+        Recommend risk management action.
+
+        Args:
+            risk_state: Current risk state
+            thresholds: Risk thresholds
+
+        Returns:
+            Action recommendation
+        """
+        system_prompt = """You are a risk management decision AI assistant.
+Your role is to recommend specific risk actions based on current state.
+Be decisive but conservative - protect capital first."""
+
+        state_str = self._format_metrics(risk_state)
+        threshold_str = self._format_metrics(thresholds)
+
+        prompt = f"""Recommend risk action:
+
+## Current Risk State
+{state_str}
+
+## Thresholds
+{threshold_str}
+
+Provide:
+1. **Recommended Action** - Specific action to take (or no action)
+2. **Urgency** - Immediate/Soon/Can wait
+3. **Rationale** - Why this action
+4. **Expected Outcome** - What this should achieve
+
+Be specific about the action (e.g., "reduce position size by 20%")."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=600)
+
+    def analyze_correlation_breakdown(
+        self,
+        correlation_matrix: Dict[str, Any],
+        changes: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """
+        Analyze correlation changes in portfolio.
+
+        Args:
+            correlation_matrix: Current correlation matrix
+            changes: Detected correlation changes
+
+        Returns:
+            Correlation analysis
+        """
+        system_prompt = """You are a portfolio correlation analyst AI assistant.
+Your role is to analyze correlation changes and their risk implications.
+Focus on diversification and concentration risks."""
+
+        changes_str = "\n".join([
+            f"- {c['pair']}: {c['old_correlation']:.2f} -> {c['new_correlation']:.2f} ({c['direction']})"
+            for c in changes[:10]
+        ])
+
+        prompt = f"""Analyze correlation changes:
+
+## Significant Changes
+{changes_str}
+
+Provide:
+1. **Interpretation** - What these changes mean
+2. **Diversification Impact** - Effect on portfolio diversification
+3. **Risk Implications** - New risks from correlation changes
+4. **Recommended Adjustments** - Portfolio changes to consider
+
+Focus on actionable insights."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=800)
+
+    # ============================================================
+    # Portfolio Strategist Agent Methods
+    # ============================================================
+
+    def evaluate_candidates(
+        self,
+        candidates: List[Dict[str, Any]],
+        portfolio: List[str],
+        constraints: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Evaluate stock candidates for addition.
+
+        Args:
+            candidates: Stock candidates with scores
+            portfolio: Current portfolio
+            constraints: Risk constraints
+
+        Returns:
+            Candidate evaluation
+        """
+        system_prompt = """You are a stock selection AI assistant.
+Your role is to evaluate candidates for portfolio addition.
+Consider both upside potential and fit with existing portfolio."""
+
+        candidates_str = self._format_candidates(candidates)
+        constraints_str = self._format_metrics(constraints)
+
+        prompt = f"""Evaluate these candidates for portfolio addition:
+
+## Current Portfolio
+{', '.join(portfolio) if portfolio else 'Empty'}
+
+## Risk Constraints
+{constraints_str}
+
+## Candidates
+{candidates_str}
+
+Provide:
+1. **Top Picks** - Best 3 candidates with reasoning
+2. **Avoid** - Any candidates that should NOT be added
+3. **Fit Analysis** - How candidates complement existing portfolio
+4. **Entry Guidance** - Timing and sizing suggestions
+
+Be specific about why each pick is recommended."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=1000)
+
+    def recommend_rebalancing(
+        self,
+        current_weights: Dict[str, float],
+        target_weights: Dict[str, float],
+        costs: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Recommend rebalancing trades.
+
+        Args:
+            current_weights: Current portfolio weights
+            target_weights: Target portfolio weights
+            costs: Estimated trading costs
+
+        Returns:
+            Rebalancing recommendation
+        """
+        system_prompt = """You are a portfolio rebalancing AI assistant.
+Your role is to recommend efficient rebalancing trades.
+Balance precision with trading costs."""
+
+        current_str = "\n".join([f"- {s}: {w:.1%}" for s, w in sorted(current_weights.items(), key=lambda x: -x[1])])
+        target_str = "\n".join([f"- {s}: {w:.1%}" for s, w in sorted(target_weights.items(), key=lambda x: -x[1])])
+
+        prompt = f"""Recommend rebalancing approach:
+
+## Current Weights
+{current_str}
+
+## Target Weights
+{target_str}
+
+## Estimated Costs
+{self._format_metrics(costs)}
+
+Provide:
+1. **Rebalancing Priority** - Which trades are most important
+2. **Trade Sequence** - Optimal order of execution
+3. **Cost-Benefit** - Whether rebalancing is worthwhile
+4. **Partial Rebalancing** - If full rebalancing isn't justified, what to do
+
+Be specific about trade sizes and urgency."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=800)
+
+    def analyze_underperformers(
+        self,
+        holdings: List[Dict[str, Any]],
+        benchmark_return: float
+    ) -> Optional[str]:
+        """
+        Analyze underperforming holdings.
+
+        Args:
+            holdings: Current holdings with returns
+            benchmark_return: Benchmark return for comparison
+
+        Returns:
+            Underperformer analysis
+        """
+        system_prompt = """You are a portfolio performance analyst AI assistant.
+Your role is to analyze underperforming positions and recommend actions.
+Be objective - recommend exits only when clearly justified."""
+
+        holdings_str = self._format_holdings(holdings)
+
+        prompt = f"""Analyze underperforming holdings:
+
+## Benchmark Return (3M)
+{benchmark_return:.1%}
+
+## Holdings
+{holdings_str}
+
+Provide:
+1. **Exit Recommendations** - Which positions to sell and why
+2. **Hold Recommendations** - Which underperformers to keep and why
+3. **Watch List** - Positions to monitor closely
+4. **Timing Guidance** - When to execute exits
+
+Be conservative - only recommend exits for clear underperformers."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=1000)
+
+    # ============================================================
+    # Operations Agent Methods
+    # ============================================================
+
+    def evaluate_action_request(
+        self,
+        request: str,
+        system_state: Dict[str, Any],
+        cooldowns: Dict[str, bool]
+    ) -> Optional[str]:
+        """
+        Evaluate an action request.
+
+        Args:
+            request: The action request
+            system_state: Current system state
+            cooldowns: Cooldown status for actions
+
+        Returns:
+            Action evaluation
+        """
+        system_prompt = """You are a trading system operations AI assistant.
+Your role is to evaluate action requests and decide what to do.
+Be conservative - prefer stability over frequent changes."""
+
+        state_str = self._format_metrics(system_state)
+        cooldown_str = "\n".join([f"- {action}: {'Available' if avail else 'On cooldown'}" for action, avail in cooldowns.items()])
+
+        prompt = f"""Evaluate this action request:
+
+## Request
+{request}
+
+## System State
+{state_str}
+
+## Action Availability
+{cooldown_str}
+
+Provide:
+1. **Recommended Action** - Which action to take (or no_action)
+2. **Reasoning** - Why this action
+3. **Risks** - Potential downsides
+4. **Alternatives** - Other options considered
+
+Choose from available actions only."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=600)
+
+    def analyze_execution_quality(
+        self,
+        metrics: Dict[str, Any],
+        trades: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """
+        Analyze trade execution quality.
+
+        Args:
+            metrics: Execution quality metrics
+            trades: Recent trades
+
+        Returns:
+            Execution quality analysis
+        """
+        system_prompt = """You are a trade execution analyst AI assistant.
+Your role is to analyze execution quality and identify improvements.
+Focus on slippage, timing, and fill rates."""
+
+        metrics_str = self._format_metrics(metrics)
+
+        prompt = f"""Analyze execution quality:
+
+## Execution Metrics
+{metrics_str}
+
+## Trade Count
+{len(trades)} trades analyzed
+
+Provide:
+1. **Quality Assessment** - Overall execution quality rating
+2. **Issues Identified** - Specific execution problems
+3. **Improvement Recommendations** - How to improve execution
+4. **Broker/Venue Considerations** - Any routing suggestions
+
+Be specific about percentages and improvements."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=600)
+
+    def diagnose_system_issue(
+        self,
+        health_data: Dict[str, Any],
+        issues: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """
+        Diagnose system health issues.
+
+        Args:
+            health_data: System health data
+            issues: Detected issues
+
+        Returns:
+            Diagnostic analysis
+        """
+        system_prompt = """You are a trading system diagnostics AI assistant.
+Your role is to diagnose system issues and recommend fixes.
+Focus on maintaining system stability."""
+
+        health_str = self._format_metrics(health_data)
+        issues_str = "\n".join([f"- {i.get('type', 'unknown')}: {i.get('component', 'N/A')}" for i in issues])
+
+        prompt = f"""Diagnose system issues:
+
+## Health Data
+{health_str}
+
+## Detected Issues
+{issues_str}
+
+Provide:
+1. **Diagnosis** - Root cause analysis
+2. **Severity** - Impact assessment
+3. **Recommended Fix** - Specific remediation steps
+4. **Prevention** - How to prevent recurrence
+
+Be specific about components and actions."""
+
+        return self.generate(prompt, system_prompt=system_prompt, max_tokens=600)
+
     def _format_candidates(self, candidates: List[Dict[str, Any]]) -> str:
         """Format candidate stocks for prompt."""
         lines = []

@@ -40,8 +40,15 @@ def get_agent_notifier(config: Optional[Dict[str, Any]] = None) -> "AgentNotifie
 
 # Discord embed colors for agents
 COLORS = {
+    # Legacy roles
     AgentRole.STOCK_ANALYST: 0x3498DB,  # Blue
     AgentRole.DEVELOPER: 0x9B59B6,       # Purple
+
+    # New 4-agent system colors
+    AgentRole.MARKET_INTELLIGENCE: 0x3498DB,  # Blue - News/macro data
+    AgentRole.RISK_GUARDIAN: 0xE74C3C,        # Red - Risk alerts
+    AgentRole.PORTFOLIO_STRATEGIST: 0x2ECC71, # Green - Portfolio decisions
+    AgentRole.OPERATIONS: 0x9B59B6,           # Purple - System operations
 }
 
 # Priority indicators

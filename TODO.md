@@ -1,5 +1,52 @@
 # Trading Bot TODO
 
+## Phase 25: 4-Agent Trading System (COMPLETE)
+
+### Overview
+Replaced 2-agent system with comprehensive 4-agent architecture.
+
+### Phase 1: Infrastructure Updates
+- [x] Update `AgentRole` enum with 4 new roles
+- [x] Update `agent_notifier.py` with new Discord colors
+- [x] Update `__init__.py` exports
+
+### Phase 2: Market Intelligence Agent
+- [x] Create `src/agents/market_intelligence.py`
+- [x] Implement news scanning with SentimentFetcher
+- [x] Implement earnings tracking
+- [x] Implement macro analysis
+- [x] Add LLM prompts for news/macro analysis
+
+### Phase 3: Risk Guardian Agent
+- [x] Create `src/agents/risk_guardian.py`
+- [x] Implement risk metrics calculation
+- [x] Implement drawdown monitoring
+- [x] Implement correlation tracking
+- [x] Implement emergency actions
+- [x] Add LLM prompts for risk assessment
+
+### Phase 4: Portfolio Strategist Agent
+- [x] Create `src/agents/portfolio_strategist.py`
+- [x] Migrate screening from stock_analyst.py
+- [x] Implement performance attribution
+- [x] Implement rebalancing logic
+- [x] Add LLM prompts for portfolio decisions
+
+### Phase 5: Operations Agent
+- [x] Create `src/agents/operations_agent.py`
+- [x] Migrate actions from developer_agent.py
+- [x] Add execution quality monitoring
+- [x] Add system health checks
+- [x] Add LLM prompts for operations
+
+### Phase 6: Orchestrator & Integration
+- [x] Rewrite orchestrator for 4-agent system
+- [x] Schedule all 16 agent jobs
+- [x] Update configuration loading
+- [x] Test full system verification
+
+---
+
 ## Phase 24: Dynamic AI-Driven Stock Selection (COMPLETE)
 
 ### Phase 1: Fundamental Data Infrastructure
