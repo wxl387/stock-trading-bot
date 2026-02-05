@@ -210,6 +210,58 @@ class OperationsAgent(BaseAgent):
         """
         return []
 
+    def run_cycle(self) -> Dict[str, Any]:
+        """
+        Run a message processing cycle.
+
+        Gets pending messages from the queue, processes them, and returns summary.
+
+        Returns:
+            Dictionary with cycle results:
+            - messages_processed: Number of messages processed
+            - messages_sent: Number of response messages sent
+            - errors: List of any errors encountered
+        """
+        result = {
+            "messages_processed": 0,
+            "messages_sent": 0,
+            "errors": []
+        }
+
+        try:
+            # Get unprocessed messages for Operations agent
+            pending = self.message_queue.get_messages_for_recipient(
+                AgentRole.OPERATIONS, processed=False
+            )
+
+            for message in pending:
+                try:
+                    response = self.process_message(message)
+                    result["messages_processed"] += 1
+
+                    if response:
+                        self.message_queue.add_message(response)
+                        result["messages_sent"] += 1
+
+                        # Send notification
+                        if self.notifier:
+                            self.notifier.notify_agent_message(response)
+
+                    # Mark as processed
+                    self.message_queue.mark_processed(message.id)
+
+                except Exception as e:
+                    error_msg = f"Error processing message {message.id}: {e}"
+                    logger.error(error_msg)
+                    result["errors"].append(error_msg)
+
+        except Exception as e:
+            error_msg = f"Error in run_cycle: {e}"
+            logger.error(error_msg)
+            result["errors"].append(error_msg)
+
+        return result
+
     def process_message(self, message: AgentMessage) -> Optional[AgentMessage]:
         """
         Process incoming messages and take appropriate actions.
