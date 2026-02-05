@@ -644,9 +644,328 @@ For Phase 21, recommended enhancements include:
 
 ---
 
-*Last updated: 2026-01-28*
-*Current version: Phases 20-21 complete, Phase 22 preparation complete*
+---
+
+## Phase 23: Multi-Agent Collaboration System (COMPLETE)
+
+### Overview
+Built a 24/7 AI-powered multi-agent system that monitors and improves the trading bot automatically.
+
+### Agents
+
+**Stock Analyst Agent** (`src/agents/stock_analyst.py`)
+- Monitors market performance (Sharpe ratio, drawdown, win rate)
+- Detects model degradation
+- Generates daily portfolio reviews
+- Suggests improvements to the Developer agent
+
+**Developer Agent** (`src/agents/developer_agent.py`)
+- Evaluates suggestions from Stock Analyst
+- Implements changes automatically:
+  - Triggers model retraining
+  - Adjusts configuration parameters
+  - Enables/disables features
+- Maintains action cooldowns to prevent over-reacting
+
+### Architecture
+
+```
++-------------------------------------+
+|       Agent Orchestrator            |
+|   (APScheduler-based coordinator)   |
++--------------+----------------------+
+               |
+    +----------+----------+
+    v                     v
++------------+    +----------------+
+|  Stock     |<-->|   Developer    |
+|  Analyst   |    |   Agent        |
++-----+------+    +-------+--------+
+      |                   |
+      v                   v
++-------------------------------------+
+|  Message Queue (SQLite) + Discord   |
+|  - Persistent history               |
+|  - Real-time Discord embeds         |
++-------------------------------------+
+```
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `src/agents/__init__.py` | Package exports |
+| `src/agents/base_agent.py` | AgentMessage dataclass, BaseAgent ABC |
+| `src/agents/message_queue.py` | SQLite persistent message queue |
+| `src/agents/llm_client.py` | Claude API wrapper |
+| `src/agents/agent_notifier.py` | Discord notification integration |
+| `src/agents/stock_analyst.py` | Performance monitoring agent |
+| `src/agents/developer_agent.py` | Action implementation agent |
+| `src/agents/orchestrator.py` | APScheduler coordination |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/core/trading_engine.py` | Added agent orchestrator integration |
+| `config/trading_config.yaml` | Added agents configuration section |
+| `.env.example` | Added ANTHROPIC_API_KEY |
+
+### Configuration
+
+Enable agents in `config/trading_config.yaml`:
+```yaml
+agents:
+  enabled: true
+  use_llm: true
+  llm_model: "claude-opus-4-5-20251101"
+
+  stock_analyst:
+    health_check_hours: 4
+    degradation_check_hours: 12
+    daily_review_time: "16:30"
+    sharpe_warning: 0.5
+    drawdown_warning: 0.10
+    win_rate_warning: 0.45
+
+  developer:
+    auto_retrain_on_degradation: true
+    auto_adjust_confidence: true
+    cooldown_hours: 4
+
+  notifications:
+    discord_enabled: true
+```
+
+Add to `.env`:
+```
+ANTHROPIC_API_KEY=your_api_key
+```
+
+### Schedules
+
+| Agent | Task | Schedule |
+|-------|------|----------|
+| Stock Analyst | Health check | Every 4 hours |
+| Stock Analyst | Degradation check | Every 12 hours |
+| Stock Analyst | Daily review | 4:30 PM |
+| Developer | Process messages | Every 30 minutes |
+
+### Alert Thresholds
+
+| Metric | Warning Level |
+|--------|---------------|
+| Sharpe Ratio | < 0.5 |
+| Max Drawdown | > 10% |
+| Win Rate | < 45% |
+| Accuracy Drop | > 3% |
+
+### Developer Actions
+
+| Action | Description | Cooldown |
+|--------|-------------|----------|
+| trigger_retrain | Trigger model retraining | 4 hours |
+| adjust_confidence_threshold | Modify ML confidence threshold | 4 hours |
+| adjust_position_size | Adjust max position size | 4 hours |
+| adjust_stop_loss | Tighten/loosen stop loss | 4 hours |
+| toggle_degradation_detection | Enable/disable degradation monitoring | 4 hours |
+| toggle_auto_rollback | Enable/disable auto rollback | 4 hours |
+
+### Discord Integration
+
+Agent messages appear in Discord with:
+- Blue embeds for Stock Analyst messages
+- Purple embeds for Developer messages
+- Warning emoji for high priority alerts
+- Threaded conversations visible
+- Conversation log saved to `logs/agent_conversations.log`
+
+### Dependencies
+
+Add to requirements:
+```
+anthropic>=0.18.0
+```
+
+### Example Agent Conversation
+
+```
+[STOCK_ANALYST -> DEVELOPER] (observation)
+Subject: Performance Alert: 2 issue(s) detected
+
+## Performance Analysis Report
+**Analysis Time:** 2026-02-03 16:30
+
+### Current Metrics:
+- Sharpe Ratio: 0.42
+- Max Drawdown: 12.3%
+- Win Rate: 48%
+
+### Issues Detected:
+- Low Sharpe: 0.42 (threshold: 0.50)
+- High Drawdown: 12.3% (threshold: 10%)
+
+### Suggested Actions:
+1. Retrain models with recent volatile market data
+2. Consider increasing confidence threshold to reduce noise
+============================================================
+
+[DEVELOPER -> STOCK_ANALYST] (action)
+Subject: Action: Triggered Retraining
+
+## Action Taken: Triggered Retraining
+**Timestamp:** 2026-02-03 16:32
+
+### Details:
+- **Reason:** High drawdown and low Sharpe indicate model needs update
+- **Model Type:** XGBoost
+- **Result:** Retraining job queued
+============================================================
+```
+
+---
+
+*Last updated: 2026-02-04*
+*Current version: Phase 24 complete (Dynamic AI-Driven Stock Selection)*
 *Phase 20: Portfolio Optimization Integration (validated)*
 *Phase 21: Advanced visualizations, regime-aware optimization, transaction costs (validated)*
 *Phase 22 Prep: Automated performance reporting, configuration tuning for active trading*
+*Phase 23: Multi-Agent Collaboration System with Claude API integration (complete)*
+*Phase 24: Dynamic AI-Driven Stock Selection System (COMPLETE)*
 *Next: Phase 22 - Production Deployment (Paper Trading with WebBull)*
+
+---
+
+## Phase 24: Dynamic AI-Driven Stock Selection System (COMPLETE)
+
+### Overview
+Expand the trading bot from 7 fixed symbols to a dynamic AI-driven stock selection system that:
+1. Analyzes company financials (earnings, balance sheets, ratios)
+2. Screens and ranks stocks from a large universe (S&P 500 + NASDAQ 100)
+3. Monitors market conditions for entry/exit timing
+4. Dynamically adds/removes symbols at runtime
+5. Enhances the Stock Analyst agent with screening capabilities
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Stock Universe                           │
+│         (S&P 500 + NASDAQ 100 = ~550 stocks)               │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Stock Screener                            │
+│  - Fundamental Score (P/E, growth, ROE, margins)           │
+│  - Technical Score (RSI, MACD, price vs MAs)               │
+│  - Momentum Score (relative strength)                       │
+│  - Sentiment Score (news, analyst ratings)                  │
+│  - LLM Analysis (Claude for context-aware ranking)          │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Symbol Manager                             │
+│  - Active portfolio: 5-20 symbols                          │
+│  - Runtime add/remove                                       │
+│  - Performance tracking                                     │
+│  - Cooldown periods                                         │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Enhanced Stock Analyst                         │
+│  - Weekly screening → recommend new stocks                 │
+│  - Daily review → identify underperformers                 │
+│  - Market timing → when to add/reduce exposure             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Files Created
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `src/data/fundamental_fetcher.py` | Fetch financial data (earnings, ratios, balance sheet) | ✅ Complete |
+| `src/data/stock_universe.py` | Manage S&P 500 / NASDAQ 100 universe | ✅ Complete |
+| `src/screening/stock_screener.py` | Score and rank stocks | ✅ Complete |
+| `src/screening/screening_strategies.py` | Predefined strategies (growth, value, momentum) | ✅ Complete |
+| `src/core/symbol_manager.py` | Dynamic symbol add/remove at runtime | ✅ Complete |
+| `src/risk/market_timing.py` | Market condition analysis for timing | ✅ Complete |
+
+### Files Modified
+
+| File | Change | Status |
+|------|--------|--------|
+| `src/data/feature_engineer.py` | Add fundamental features (P/E, ROE, etc.) | ✅ Complete |
+| `src/agents/stock_analyst.py` | Add screening, portfolio review, market analysis | ✅ Complete |
+| `src/agents/llm_client.py` | Add screening and evaluation prompts | ✅ Complete |
+| `src/agents/developer_agent.py` | Add symbol add/remove actions | ✅ Complete |
+| `src/agents/orchestrator.py` | Add weekly screening schedule | ✅ Complete |
+| `src/core/trading_engine.py` | Integrate SymbolManager | ✅ Complete |
+| `config/trading_config.yaml` | Add dynamic_symbols configuration | ✅ Complete |
+
+### Configuration
+
+```yaml
+dynamic_symbols:
+  enabled: true
+
+  universe:
+    sources: ["sp500", "nasdaq100"]
+    min_market_cap: 10000000000  # $10B
+    min_avg_volume: 1000000
+    min_price: 5.0
+
+  constraints:
+    min_symbols: 10
+    max_symbols: 15
+    max_sector_exposure: 0.30
+    max_single_stock: 0.15
+
+  screening:
+    strategy: "balanced"  # growth, value, momentum, quality, balanced
+    refresh_day: "sunday"
+    refresh_time: "18:00"
+
+  entry:
+    min_score: 70
+    require_technical_confirmation: true
+
+  exit:
+    underperformance_threshold: -0.10
+    max_holding_days: 90
+    loss_threshold: -0.15
+
+  cooldown_days: 30
+```
+
+### Scoring System (0-100)
+
+| Category | Weight | Components |
+|----------|--------|------------|
+| Fundamental Score | 25% | P/E percentile, earnings growth, ROE |
+| Technical Score | 25% | RSI zone, MACD signal, trend |
+| Momentum Score | 20% | 1/3/6 month returns vs sector |
+| Sentiment Score | 15% | News sentiment, analyst rating |
+| Quality Score | 15% | Margins, consistency, low volatility |
+
+### Agent Enhancements
+
+**Stock Analyst - New Methods:**
+- `run_stock_screening()` - Weekly (Sunday 6PM): Screen top 30 candidates
+- `run_portfolio_review()` - Daily: Identify underperformers
+- `run_market_analysis()` - Every 4 hours: Check market timing
+
+**Developer Agent - New Actions:**
+- `add_symbol` - Add new stock to trading universe
+- `remove_symbol` - Remove stock from universe (close position)
+- `adjust_allocation` - Change target weight for a symbol
+
+### Risk Mitigation
+
+- **Feature flag**: `dynamic_symbols.enabled` defaults to `false`
+- **Constraints**: Max 20 symbols, max 15% per stock
+- **Cooldown**: 30 days before re-adding removed symbol
+- **Gradual rollout**: Start with 10 symbols, expand slowly
+- **Backward compatible**: Static symbols still work if disabled

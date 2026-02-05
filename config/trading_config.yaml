@@ -270,6 +270,79 @@ portfolio_optimization:
                                      # BULL → Max Sharpe, BEAR → Min Variance
                                      # CHOPPY → Risk Parity, VOLATILE → Min Variance + cash buffer
 
+# Dynamic Symbol Selection System
+dynamic_symbols:
+  enabled: true                     # Set to true to enable dynamic stock selection
+
+  # Stock universe configuration
+  universe:
+    sources: ["sp500", "nasdaq100"] # Data sources for stock universe
+    min_market_cap: 10000000000     # $10B minimum market cap
+    min_avg_volume: 1000000         # 1M minimum average daily volume
+    min_price: 5.0                  # $5 minimum stock price
+
+  # Portfolio constraints
+  constraints:
+    min_symbols: 10                 # Minimum symbols in portfolio
+    max_symbols: 15                 # Maximum symbols in portfolio
+    max_sector_exposure: 0.30       # Maximum 30% in any single sector
+    max_single_stock: 0.15          # Maximum 15% in any single stock
+
+  # Screening configuration
+  screening:
+    strategy: "balanced"            # growth, value, momentum, quality, balanced
+    refresh_day: "sunday"           # Day to run weekly screening
+    refresh_time: "18:00"           # Time to run screening (24h format)
+    cache_hours: 4                  # Hours to cache screening results
+
+  # Entry criteria
+  entry:
+    min_score: 70                   # Minimum screening score (0-100) to add
+    require_technical_confirmation: true  # Require positive technical indicators
+
+  # Exit criteria
+  exit:
+    underperformance_threshold: -0.10  # Exit if 10% below benchmark
+    max_holding_days: 90               # Consider exit after 90 days
+    loss_threshold: -0.15              # Exit if 15% loss
+
+  # Cooldown period
+  cooldown_days: 30                 # Days before re-adding a removed symbol
+
+# Multi-Agent Collaboration System
+agents:
+  enabled: true                       # Enable AI-powered agents for monitoring and improvement
+  use_llm: true                       # Use Claude API for intelligent analysis
+
+  # LLM configuration
+  llm_model: "claude-opus-4-5-20251101"  # Claude model for agent intelligence
+
+  # Stock Analyst Agent - monitors performance and suggests improvements
+  stock_analyst:
+    health_check_hours: 4             # Run health check every 4 hours
+    degradation_check_hours: 12       # Run degradation check every 12 hours
+    daily_review_time: "16:30"        # Daily review at 4:30 PM
+    sharpe_warning: 0.5               # Warn if Sharpe ratio below 0.5
+    drawdown_warning: 0.10            # Warn if drawdown exceeds 10%
+    win_rate_warning: 0.45            # Warn if win rate below 45%
+    accuracy_drop_threshold: 0.03     # Alert on 3% accuracy drop
+    # Dynamic symbols related schedules (only active if dynamic_symbols.enabled)
+    stock_screening_day: "sunday"     # Day for weekly stock screening
+    stock_screening_time: "18:00"     # Time for screening (24h format)
+    portfolio_review_hours: 24        # Run portfolio review every 24 hours
+    market_analysis_hours: 4          # Run market timing analysis every 4 hours
+
+  # Developer Agent - implements changes automatically
+  developer:
+    auto_retrain_on_degradation: true # Automatically retrain when models degrade
+    auto_adjust_confidence: true      # Automatically adjust confidence threshold
+    cooldown_hours: 4                 # Hours between same action type
+    process_interval_minutes: 30      # Check for messages every 30 minutes
+
+  # Discord notification settings for agent conversations
+  notifications:
+    discord_enabled: true             # Send agent messages to Discord
+
 # Performance Reporting
 reporting:
   # Daily reports

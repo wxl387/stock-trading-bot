@@ -691,6 +691,148 @@ class FeatureEngineer:
 
         return df
 
+    def add_fundamental_features(
+        self,
+        df: pd.DataFrame,
+        symbol: Optional[str] = None,
+        use_cache: bool = True
+    ) -> pd.DataFrame:
+        """
+        Add fundamental features from financial data.
+
+        Features added:
+        - pe_ratio: Price-to-Earnings ratio
+        - pe_percentile: P/E percentile vs market (requires market_pe_values)
+        - peg_ratio: Price/Earnings to Growth ratio
+        - price_to_book: Price-to-Book ratio
+        - debt_to_equity: Debt-to-Equity ratio
+        - profit_margin: Profit margin
+        - roe: Return on Equity
+        - roa: Return on Assets
+        - revenue_growth_yoy: Year-over-year revenue growth
+        - earnings_growth_yoy: Year-over-year earnings growth
+        - days_to_earnings: Days until next earnings report
+        - near_earnings: Binary flag (1 if earnings within 14 days)
+
+        Args:
+            df: DataFrame with price data
+            symbol: Stock symbol for fundamental lookup
+            use_cache: Whether to use cached fundamental data
+
+        Returns:
+            DataFrame with added fundamental features
+        """
+        df = df.copy()
+
+        # Default neutral values
+        neutral_features = {
+            "pe_ratio": 0.0,
+            "pe_percentile": 50.0,
+            "peg_ratio": 0.0,
+            "price_to_book": 0.0,
+            "debt_to_equity": 0.0,
+            "profit_margin": 0.0,
+            "roe": 0.0,
+            "roa": 0.0,
+            "revenue_growth_yoy": 0.0,
+            "earnings_growth_yoy": 0.0,
+            "days_to_earnings": 90.0,
+            "near_earnings": 0,
+        }
+
+        if symbol is None:
+            for feat, val in neutral_features.items():
+                df[feat] = val
+            return df
+
+        try:
+            from src.data.fundamental_fetcher import get_fundamental_fetcher
+
+            fetcher = get_fundamental_fetcher()
+            fundamentals = fetcher.fetch_fundamentals(symbol, use_cache=use_cache)
+
+            # Add features as constant columns (fundamentals are point-in-time)
+            df["pe_ratio"] = fundamentals.pe_ratio or 0.0
+            df["pe_percentile"] = 50.0  # Would need market comparison
+            df["peg_ratio"] = fundamentals.peg_ratio or 0.0
+            df["price_to_book"] = fundamentals.price_to_book or 0.0
+            df["debt_to_equity"] = fundamentals.debt_to_equity or 0.0
+            df["profit_margin"] = fundamentals.profit_margin or 0.0
+            df["roe"] = fundamentals.roe or 0.0
+            df["roa"] = fundamentals.roa or 0.0
+            df["revenue_growth_yoy"] = fundamentals.revenue_growth_yoy or 0.0
+            df["earnings_growth_yoy"] = fundamentals.earnings_growth_yoy or 0.0
+
+            # Days to earnings
+            if fundamentals.days_to_earnings is not None:
+                df["days_to_earnings"] = float(fundamentals.days_to_earnings)
+                df["near_earnings"] = (fundamentals.days_to_earnings <= 14).astype(int)
+            else:
+                df["days_to_earnings"] = 90.0
+                df["near_earnings"] = 0
+
+            # Ensure all expected columns exist
+            for feat, val in neutral_features.items():
+                if feat not in df.columns:
+                    df[feat] = val
+
+        except Exception as e:
+            logger.warning(f"Could not add fundamental features for {symbol}: {e}")
+            for feat, val in neutral_features.items():
+                df[feat] = val
+
+        return df
+
+    def add_all_features_with_fundamentals(
+        self,
+        df: pd.DataFrame,
+        symbol: Optional[str] = None,
+        include_sentiment: bool = False,
+        include_macro: bool = False,
+        include_fundamentals: bool = True,
+        include_cross_asset: bool = False,
+        include_interactions: bool = False,
+        include_lagged: bool = False,
+        use_cache: bool = True
+    ) -> pd.DataFrame:
+        """
+        Add all features including fundamentals.
+
+        This is an enhanced version of add_all_features_extended that includes
+        fundamental data from financial statements.
+
+        Args:
+            df: DataFrame with OHLCV data
+            symbol: Stock symbol for data lookup
+            include_sentiment: Whether to include sentiment features
+            include_macro: Whether to include macroeconomic features
+            include_fundamentals: Whether to include fundamental features
+            include_cross_asset: Whether to include cross-asset features
+            include_interactions: Whether to include feature interactions
+            include_lagged: Whether to include lagged features
+            use_cache: Whether to use cached data
+
+        Returns:
+            DataFrame with all features added
+        """
+        # Add all standard features first
+        df = self.add_all_features_extended(
+            df=df,
+            symbol=symbol,
+            include_sentiment=include_sentiment,
+            include_macro=include_macro,
+            include_cross_asset=include_cross_asset,
+            include_interactions=include_interactions,
+            include_lagged=include_lagged,
+            use_cache=use_cache
+        )
+
+        # Add fundamental features if requested
+        if include_fundamentals:
+            df = self.add_fundamental_features(df, symbol=symbol, use_cache=use_cache)
+
+        return df
+
     def get_feature_names(self, include_sentiment: bool = False, include_macro: bool = False) -> List[str]:
         """
         Get list of feature names that will be created.

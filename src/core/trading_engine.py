@@ -18,6 +18,24 @@ from src.notifications.notifier_manager import NotifierManager, get_notifier
 from src.portfolio.portfolio_optimizer import PortfolioOptimizer, OptimizationMethod
 from src.portfolio.rebalancer import PortfolioRebalancer, RebalanceTrigger
 
+# Optional import for AgentOrchestrator
+try:
+    from src.agents.orchestrator import AgentOrchestrator, get_orchestrator
+    AGENTS_AVAILABLE = True
+except ImportError:
+    AgentOrchestrator = None
+    get_orchestrator = None
+    AGENTS_AVAILABLE = False
+
+# Optional import for SymbolManager
+try:
+    from src.core.symbol_manager import SymbolManager, get_symbol_manager
+    SYMBOL_MANAGER_AVAILABLE = True
+except ImportError:
+    SymbolManager = None
+    get_symbol_manager = None
+    SYMBOL_MANAGER_AVAILABLE = False
+
 # Optional import for WebullBroker (requires webull package)
 try:
     from src.broker.webull_broker import WebullBroker
@@ -124,6 +142,28 @@ class TradingEngine:
                 )
                 logger.info(f"Portfolio rebalancing enabled: trigger={trigger_type}, drift={rebalancing_config.get('drift_threshold', 0.10)}")
 
+        # Initialize agent orchestrator for multi-agent collaboration
+        self.agent_orchestrator: Optional[AgentOrchestrator] = None
+        if AGENTS_AVAILABLE and self.config.get("agents", {}).get("enabled", False):
+            self.agent_orchestrator = get_orchestrator(self.config)
+            logger.info("Agent orchestrator enabled")
+
+        # Initialize symbol manager for dynamic symbol selection
+        self.symbol_manager: Optional[SymbolManager] = None
+        dynamic_symbols_config = self.config.get("dynamic_symbols", {})
+        if SYMBOL_MANAGER_AVAILABLE and dynamic_symbols_config.get("enabled", False):
+            self.symbol_manager = get_symbol_manager(self.config)
+            # Initialize with current symbols if symbol manager is empty
+            if not self.symbol_manager.get_active_symbols():
+                # Fetch sector info for initial symbols
+                sectors = self._fetch_sectors_for_symbols(symbols)
+                self.symbol_manager.initialize_with_symbols(
+                    symbols=symbols,
+                    reason="initial_configuration",
+                    sectors=sectors
+                )
+            logger.info(f"Symbol manager enabled: {len(self.symbol_manager.get_active_symbols())} active symbols")
+
         logger.info(f"Trading Engine initialized with {len(symbols)} symbols")
         if simulated:
             logger.info(f"Mode: SIMULATED (offline, ${initial_capital:,.2f} capital)")
@@ -174,6 +214,11 @@ class TradingEngine:
             status = self.retrainer.get_status()
             logger.info(f"Scheduled retraining active. Next run: {status.get('next_run', 'N/A')}")
 
+        # Start agent orchestrator if enabled
+        if self.agent_orchestrator:
+            self.agent_orchestrator.start()
+            logger.info("Agent orchestrator started for multi-agent collaboration")
+
         logger.info("Trading Engine started successfully")
 
         # Send startup notification
@@ -194,6 +239,11 @@ class TradingEngine:
         # Stop scheduled retrainer
         if self.retrainer:
             self.retrainer.stop()
+
+        # Stop agent orchestrator
+        if self.agent_orchestrator:
+            self.agent_orchestrator.stop()
+            logger.info("Agent orchestrator stopped")
 
         if self.broker:
             self.broker.disconnect()
@@ -288,6 +338,12 @@ class TradingEngine:
                 if symbol in current_prices:
                     self.risk_manager.update_trailing_stop(symbol, current_prices[symbol])
 
+            # Update symbol prices in symbol manager
+            self._update_symbol_prices()
+
+            # Get active trading symbols (from symbol manager if enabled)
+            trading_symbols = self.get_active_symbols()
+
             # Portfolio optimization and rebalancing
             target_weights = None
             if self.portfolio_optimizer:
@@ -358,9 +414,9 @@ class TradingEngine:
                                 logger.error(f"Rebalance trade error for {t_symbol}: {e}")
                                 cycle_results["errors"].append(f"Rebalance {t_symbol}: {str(e)}")
 
-            # Generate trading signals
+            # Generate trading signals (use active symbols from symbol manager if available)
             recommendations = self.strategy.get_trade_recommendations(
-                symbols=self.symbols,
+                symbols=trading_symbols,
                 portfolio_value=account.portfolio_value,
                 current_positions=current_positions,
                 risk_manager=self.risk_manager,
@@ -638,6 +694,50 @@ class TradingEngine:
         current_time = now.time()
         return self.market_open <= current_time <= self.market_close
 
+    def _fetch_sectors_for_symbols(self, symbols: List[str]) -> Dict[str, str]:
+        """Fetch sector information for symbols."""
+        sectors = {}
+        try:
+            from src.data.fundamental_fetcher import get_fundamental_fetcher
+            fetcher = get_fundamental_fetcher()
+            for symbol in symbols:
+                try:
+                    data = fetcher.fetch_fundamentals(symbol)
+                    if data.sector:
+                        sectors[symbol] = data.sector
+                except Exception:
+                    pass
+        except ImportError:
+            pass
+        return sectors
+
+    def get_active_symbols(self) -> List[str]:
+        """
+        Get the current list of active trading symbols.
+
+        If symbol manager is enabled, returns dynamically managed symbols.
+        Otherwise, returns the static symbols list.
+        """
+        if self.symbol_manager:
+            return self.symbol_manager.get_active_symbols()
+        return self.symbols
+
+    def _update_symbol_prices(self) -> None:
+        """Update symbol manager with current prices."""
+        if not self.symbol_manager or not self.broker:
+            return
+
+        try:
+            active_symbols = self.symbol_manager.get_active_symbols()
+            if not active_symbols:
+                return
+
+            quotes = self.broker.get_quotes(active_symbols)
+            prices = {s: q.last for s, q in quotes.items() if q.last > 0}
+            self.symbol_manager.update_prices(prices)
+        except Exception as e:
+            logger.warning(f"Failed to update symbol prices: {e}")
+
     def get_status(self) -> Dict:
         """
         Get current engine status.
@@ -676,6 +776,10 @@ class TradingEngine:
         # Add regime detection status
         if self.regime_detector:
             status["regime"] = self.regime_detector.get_status()
+
+        # Add symbol manager status
+        if self.symbol_manager:
+            status["symbol_manager"] = self.symbol_manager.get_status()
 
         return status
 
