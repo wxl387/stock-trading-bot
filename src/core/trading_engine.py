@@ -153,13 +153,15 @@ class TradingEngine:
         dynamic_symbols_config = self.config.get("dynamic_symbols", {})
         if SYMBOL_MANAGER_AVAILABLE and dynamic_symbols_config.get("enabled", False):
             self.symbol_manager = get_symbol_manager(self.config)
-            # Initialize with current symbols if symbol manager is empty
-            if not self.symbol_manager.get_active_symbols():
-                # Fetch sector info for initial symbols
-                sectors = self._fetch_sectors_for_symbols(symbols)
+            # Ensure base config symbols are always in the symbol manager
+            current_symbols = set(self.symbol_manager.get_active_symbols())
+            missing_symbols = [s for s in symbols if s not in current_symbols]
+            if missing_symbols:
+                # Fetch sector info for missing symbols
+                sectors = self._fetch_sectors_for_symbols(missing_symbols)
                 self.symbol_manager.initialize_with_symbols(
-                    symbols=symbols,
-                    reason="initial_configuration",
+                    symbols=missing_symbols,
+                    reason="base_config_symbols",
                     sectors=sectors
                 )
             logger.info(f"Symbol manager enabled: {len(self.symbol_manager.get_active_symbols())} active symbols")
