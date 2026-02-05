@@ -83,6 +83,7 @@ class MarketIntelligenceAgent(BaseAgent):
 
         # Lazy-loaded components
         self._sentiment_fetcher = None
+        self._news_fetcher = None
         self._macro_fetcher = None
         self._fundamental_fetcher = None
         self._symbol_manager = None
@@ -104,6 +105,17 @@ class MarketIntelligenceAgent(BaseAgent):
             except ImportError as e:
                 logger.error(f"Failed to import SentimentFetcher: {e}")
         return self._sentiment_fetcher
+
+    @property
+    def news_fetcher(self):
+        """Lazy load news fetcher."""
+        if self._news_fetcher is None:
+            try:
+                from src.data.news_fetcher import NewsFetcher
+                self._news_fetcher = NewsFetcher()
+            except ImportError as e:
+                logger.error(f"Failed to import NewsFetcher: {e}")
+        return self._news_fetcher
 
     @property
     def macro_fetcher(self):
@@ -177,8 +189,8 @@ class MarketIntelligenceAgent(BaseAgent):
 
             for symbol in portfolio_symbols:
                 try:
-                    if self.sentiment_fetcher:
-                        news_items = self.sentiment_fetcher.fetch_news(symbol, limit=10)
+                    if self.news_fetcher:
+                        news_items = self.news_fetcher.fetch_news(symbol, last=10)
                         for item in news_items:
                             item["symbol"] = symbol
                             all_news.append(item)
