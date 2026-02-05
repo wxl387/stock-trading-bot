@@ -100,9 +100,7 @@ class MarketIntelligenceAgent(BaseAgent):
         if self._sentiment_fetcher is None:
             try:
                 from src.data.sentiment_fetcher import get_sentiment_fetcher
-                from config.settings import Settings
-                config = Settings.load_trading_config()
-                self._sentiment_fetcher = get_sentiment_fetcher(config)
+                self._sentiment_fetcher = get_sentiment_fetcher()
             except ImportError as e:
                 logger.error(f"Failed to import SentimentFetcher: {e}")
         return self._sentiment_fetcher
@@ -113,9 +111,7 @@ class MarketIntelligenceAgent(BaseAgent):
         if self._macro_fetcher is None:
             try:
                 from src.data.macro_fetcher import get_macro_fetcher
-                from config.settings import Settings
-                config = Settings.load_trading_config()
-                self._macro_fetcher = get_macro_fetcher(config)
+                self._macro_fetcher = get_macro_fetcher()
             except ImportError as e:
                 logger.debug(f"MacroFetcher not available: {e}")
         return self._macro_fetcher
