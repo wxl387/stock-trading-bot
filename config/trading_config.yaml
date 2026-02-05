@@ -362,7 +362,9 @@ agents:
   portfolio_strategist:
     performance_review_hours: 4       # Review performance every 4 hours
     rebalancing_check_time: "10:00"   # Check rebalancing daily at 10 AM
-    stock_screening_day: "sunday"     # Weekly stock screening day
+    stock_screening_frequency: "daily" # Screening frequency: daily or weekly
+    stock_screening_hours: 12         # Hours between daily screening (if daily)
+    stock_screening_day: "sunday"     # Weekly stock screening day (if weekly)
     stock_screening_time: "18:00"     # Stock screening time (6 PM)
     portfolio_review_day: "monday"    # Weekly portfolio review day
     portfolio_review_time: "09:00"    # Portfolio review time (9 AM)

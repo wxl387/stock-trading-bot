@@ -296,26 +296,41 @@ class AgentOrchestrator:
                 replace_existing=True,
             )
 
-            # Stock screening: Weekly at specified day and time
-            screening_day = ps_config.get("stock_screening_day", "sunday")
-            screening_time = ps_config.get("stock_screening_time", "18:00")
-            screening_hour, screening_minute = map(int, screening_time.split(":"))
+            # Day map for weekly scheduling
             day_map = {
                 "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
                 "friday": 4, "saturday": 5, "sunday": 6
             }
-            screening_dow = day_map.get(screening_day.lower(), 6)
-            self.scheduler.add_job(
-                self._run_stock_screening,
-                trigger=CronTrigger(
-                    day_of_week=screening_dow,
-                    hour=screening_hour,
-                    minute=screening_minute
-                ),
-                id="ps_stock_screening",
-                name="Portfolio Strategist Stock Screening",
-                replace_existing=True,
-            )
+
+            # Stock screening: Daily or Weekly based on config
+            screening_frequency = ps_config.get("stock_screening_frequency", "weekly")
+            if screening_frequency == "daily":
+                # Daily screening at interval
+                screening_hours = ps_config.get("stock_screening_hours", 12)
+                self.scheduler.add_job(
+                    self._run_stock_screening,
+                    trigger=IntervalTrigger(hours=screening_hours),
+                    id="ps_stock_screening",
+                    name="Portfolio Strategist Stock Screening",
+                    replace_existing=True,
+                )
+            else:
+                # Weekly at specified day and time
+                screening_day = ps_config.get("stock_screening_day", "sunday")
+                screening_time = ps_config.get("stock_screening_time", "18:00")
+                screening_hour, screening_minute = map(int, screening_time.split(":"))
+                screening_dow = day_map.get(screening_day.lower(), 6)
+                self.scheduler.add_job(
+                    self._run_stock_screening,
+                    trigger=CronTrigger(
+                        day_of_week=screening_dow,
+                        hour=screening_hour,
+                        minute=screening_minute
+                    ),
+                    id="ps_stock_screening",
+                    name="Portfolio Strategist Stock Screening",
+                    replace_existing=True,
+                )
 
             # Portfolio review: Weekly at specified day and time
             review_day = ps_config.get("portfolio_review_day", "monday")
