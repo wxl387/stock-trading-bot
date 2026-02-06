@@ -640,7 +640,7 @@ class Backtester:
                             "exit_date": date,
                             "exit_price": price,
                             "shares": pos["shares"],
-                            "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
+                            "pnl": proceeds - (pos["shares"] * pos["entry_price"] * (1 + self.commission + self.slippage)),
                             "return": (price - pos["entry_price"]) / pos["entry_price"]
                         })
 
@@ -672,8 +672,9 @@ class Backtester:
         for sym, pos in positions.items():
             if sym in prices:
                 last_price = prices[sym].iloc[-1]
-                proceeds = pos["shares"] * last_price
+                proceeds = pos["shares"] * last_price * (1 - self.commission - self.slippage)
                 capital += proceeds
+                entry_cost = pos["shares"] * pos["entry_price"] * (1 + self.commission + self.slippage)
                 trades.append({
                     "symbol": sym,
                     "entry_date": pos["entry_date"],
@@ -681,7 +682,7 @@ class Backtester:
                     "exit_date": prices[sym].index[-1],
                     "exit_price": last_price,
                     "shares": pos["shares"],
-                    "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
+                    "pnl": proceeds - entry_cost,
                     "return": (last_price - pos["entry_price"]) / pos["entry_price"]
                 })
 
@@ -1371,7 +1372,7 @@ class Backtester:
                             "exit_date": date,
                             "exit_price": exit_price,
                             "shares": pos["shares"],
-                            "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
+                            "pnl": proceeds - (pos["shares"] * pos["entry_price"] * (1 + self.commission + self.slippage)),
                             "return": (exit_price - pos["entry_price"]) / pos["entry_price"],
                             "exit_reason": "stop_loss"
                         }
@@ -1397,7 +1398,7 @@ class Backtester:
                             "exit_date": date,
                             "exit_price": price,
                             "shares": pos["shares"],
-                            "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
+                            "pnl": proceeds - (pos["shares"] * pos["entry_price"] * (1 + self.commission + self.slippage)),
                             "return": (price - pos["entry_price"]) / pos["entry_price"],
                             "exit_reason": "signal"
                         }
@@ -1451,8 +1452,9 @@ class Backtester:
         for sym, pos in positions.items():
             if sym in prices:
                 last_price = prices[sym].iloc[-1]
-                proceeds = pos["shares"] * last_price
+                proceeds = pos["shares"] * last_price * (1 - self.commission - self.slippage)
                 capital += proceeds
+                entry_cost = pos["shares"] * pos["entry_price"] * (1 + self.commission + self.slippage)
                 trade_record = {
                     "symbol": sym,
                     "entry_date": pos["entry_date"],
@@ -1460,7 +1462,7 @@ class Backtester:
                     "exit_date": prices[sym].index[-1],
                     "exit_price": last_price,
                     "shares": pos["shares"],
-                    "pnl": proceeds - (pos["shares"] * pos["entry_price"]),
+                    "pnl": proceeds - entry_cost,
                     "return": (last_price - pos["entry_price"]) / pos["entry_price"],
                     "exit_reason": "window_end"
                 }

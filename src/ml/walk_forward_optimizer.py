@@ -715,8 +715,8 @@ class WalkForwardOptimizer:
         losses = [t for t in trades if t["pnl"] <= 0]
         win_rate = len(wins) / len(trades) if trades else 0
         total_wins = sum(t["pnl"] for t in wins) if wins else 0
-        total_losses = abs(sum(t["pnl"] for t in losses)) if losses else 1
-        profit_factor = total_wins / total_losses if total_losses > 0 else 0
+        total_losses = abs(sum(t["pnl"] for t in losses)) if losses else 0
+        profit_factor = total_wins / total_losses if total_losses > 0 else (float('inf') if total_wins > 0 else 0)
 
         return {
             "sharpe_ratio": sharpe,

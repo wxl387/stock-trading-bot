@@ -54,7 +54,8 @@ def main():
 
     # Last updated
     metrics = data_provider.get_portfolio_metrics()
-    st.sidebar.markdown(f"*Last updated: {metrics.get('last_updated', 'N/A')[:19]}*")
+    last_updated = metrics.get('last_updated', 'N/A') or 'N/A'
+    st.sidebar.markdown(f"*Last updated: {str(last_updated)[:19]}*")
 
     # Main content
     if page == "Portfolio Overview":
@@ -205,7 +206,7 @@ def render_positions(data_provider):
     with col2:
         st.metric("Unrealized P&L", f"${total_pnl:,.2f}")
     with col3:
-        st.metric("Avg P&L %", f"{avg_pnl_pct:.2f}%")
+        st.metric("Avg P&L %", f"{avg_pnl_pct:.2f}%" if pd.notna(avg_pnl_pct) else "N/A")
 
     st.divider()
 
