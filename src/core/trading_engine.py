@@ -333,6 +333,11 @@ class TradingEngine:
             quotes = self.broker.get_quotes(list(current_positions.keys()))
             current_prices = {s: q.last for s, q in quotes.items()}
 
+            # Update trailing stops BEFORE checking triggers so latest highs are reflected
+            for symbol in current_positions:
+                if symbol in current_prices:
+                    self.risk_manager.update_trailing_stop(symbol, current_prices[symbol])
+
             # Check stop losses
             triggered_stops = self.risk_manager.check_stop_losses(current_prices)
             for symbol in triggered_stops:
@@ -358,11 +363,6 @@ class TradingEngine:
                 positions = self.broker.get_positions()
                 current_positions = {p.symbol: p.quantity for p in positions}
                 position_market_values = {p.symbol: p.market_value for p in positions}
-
-            # Update trailing stops
-            for symbol in current_positions:
-                if symbol in current_prices:
-                    self.risk_manager.update_trailing_stop(symbol, current_prices[symbol])
 
             # Update symbol prices in symbol manager
             self._update_symbol_prices()

@@ -298,8 +298,16 @@ class SimulatedBroker(BaseBroker):
 
         # Fallback: use last known price from position
         if symbol in self.positions:
-            return self.positions[symbol].get("last_price", 100.0)
-        return 100.0  # Default fallback
+            last = self.positions[symbol].get("last_price")
+            if last and last > 0:
+                logger.warning(f"Using last known price for {symbol}: ${last:.2f}")
+                return last
+            avg = self.positions[symbol].get("avg_cost")
+            if avg and avg > 0:
+                logger.warning(f"Using avg cost as fallback price for {symbol}: ${avg:.2f}")
+                return avg
+        logger.error(f"No price available for {symbol}, cannot execute order")
+        raise ValueError(f"No price available for {symbol}")
 
     def _execute_fill(self, symbol: str, side: OrderSide, quantity: int, price: float) -> None:
         """Execute a fill and update positions/cash."""
@@ -336,9 +344,9 @@ class SimulatedBroker(BaseBroker):
             # Add cash
             self.cash += proceeds
 
-            # Reset avg cost if position is closed
+            # Remove position entry if fully closed
             if pos["quantity"] == 0:
-                pos["avg_cost"] = 0.0
+                del self.positions[symbol]
 
         pos["last_price"] = price
 

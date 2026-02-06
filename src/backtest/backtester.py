@@ -83,7 +83,7 @@ class Backtester:
         downside_dev = np.sqrt((downside_returns ** 2).mean()) * np.sqrt(252)
         if downside_dev == 0:
             return 0.0
-        ann_return = (1 + daily_returns.mean()) ** 252 - 1
+        ann_return = daily_returns.mean() * 252
         return (ann_return - risk_free_rate) / downside_dev
 
     def _get_feature_columns(self, df: pd.DataFrame) -> List[str]:

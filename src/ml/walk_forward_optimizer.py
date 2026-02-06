@@ -701,7 +701,7 @@ class WalkForwardOptimizer:
             downside = daily_returns[daily_returns < 0]
             if len(downside) > 0:
                 downside_dev = np.sqrt((downside ** 2).mean()) * np.sqrt(252)
-                ann_return = (1 + daily_returns.mean()) ** 252 - 1
+                ann_return = daily_returns.mean() * 252
                 sortino = ann_return / downside_dev if downside_dev > 0 else 0.0
             else:
                 sortino = 0.0
