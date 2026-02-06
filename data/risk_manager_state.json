@@ -2,13 +2,13 @@
   "stop_losses": {
     "META": {
       "stop_type": "trailing",
-      "stop_price": 624.5394744873047,
+      "stop_price": 628.2645111083984,
       "entry_price": 657.4099731445312,
       "trailing_distance": 32.87049865722656
     },
     "AMAT": {
       "stop_type": "trailing",
-      "stop_price": 307.0020034790039,
+      "stop_price": 307.3145034790039,
       "entry_price": 323.1600036621094,
       "trailing_distance": 16.158000183105457
     },
@@ -96,7 +96,7 @@
       ]
     }
   },
-  "peak_portfolio_value": 100000.0,
+  "peak_portfolio_value": 100211.56144714355,
   "drawdown_recovery_mode": false,
-  "saved_at": "2026-02-06T14:56:27.349548"
+  "saved_at": "2026-02-06T15:30:48.540252"
 }
