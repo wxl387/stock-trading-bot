@@ -209,6 +209,7 @@ class TransformerModel:
 
         logger.info(f"Built Transformer model with {model.count_params():,} parameters (device: {_DEVICE})")
 
+        self.model = model
         return model
 
     def train(

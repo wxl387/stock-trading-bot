@@ -122,6 +122,7 @@ class CNNModel:
 
         logger.info(f"Built CNN model with {model.count_params():,} parameters (device: {_DEVICE})")
 
+        self.model = model
         return model
 
     def train(

@@ -107,6 +107,7 @@ class LSTMModel:
 
         logger.info(f"Built LSTM model with {model.count_params():,} parameters (device: {_DEVICE})")
 
+        self.model = model
         return model
 
     def train(
