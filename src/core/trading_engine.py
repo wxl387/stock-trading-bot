@@ -92,11 +92,29 @@ class TradingEngine:
             confidence_threshold=ml_config.get("confidence_threshold", 0.55),
             min_confidence_sell=ml_config.get("min_confidence_sell", 0.55),
         )
+        risk_config = self.config.get("risk_management", {})
         self.risk_manager = RiskManager(
-            max_position_pct=self.config.get("risk_management", {}).get("max_position_pct", 0.10),
-            max_daily_loss_pct=self.config.get("risk_management", {}).get("max_daily_loss_pct", 0.05),
-            max_total_exposure=self.config.get("risk_management", {}).get("max_total_exposure", 0.80)
+            max_position_pct=risk_config.get("max_position_pct", 0.10),
+            max_daily_loss_pct=risk_config.get("max_daily_loss_pct", 0.05),
+            max_total_exposure=risk_config.get("max_total_exposure", 0.80)
         )
+
+        # Wire VIX-based sizing from config
+        vol_config = risk_config.get("volatility_sizing", {})
+        self.risk_manager.set_vix_sizing(
+            enabled=vol_config.get("enabled", True),
+            thresholds=vol_config.get("vix_thresholds"),
+            multipliers=vol_config.get("size_multipliers"),
+        )
+
+        # Wire drawdown protection from config
+        dd_config = risk_config.get("drawdown_protection", {})
+        if dd_config.get("enabled", True):
+            self.risk_manager.set_drawdown_protection(
+                max_drawdown_pct=dd_config.get("max_drawdown_pct", 0.10),
+                recovery_threshold=dd_config.get("recovery_threshold", 0.95),
+                recovery_size_multiplier=dd_config.get("recovery_size_multiplier", 0.5),
+            )
 
         # Market hours (Eastern Time)
         self.market_open = dt_time(9, 30)
@@ -115,10 +133,34 @@ class TradingEngine:
             self.notifier = get_notifier()
             logger.info("Notifications enabled")
 
-        # Initialize regime detector
+        # Initialize regime detector with config parameters
         self.regime_detector: Optional[RegimeDetector] = None
-        if self.config.get("risk_management", {}).get("regime_detection", {}).get("enabled", True):
+        regime_config = self.config.get("risk_management", {}).get("regime_detection", {})
+        if regime_config.get("enabled", True):
             self.regime_detector = get_regime_detector()
+            # Wire regime parameters from config
+            regime_params_config = regime_config.get("regime_parameters", {})
+            if regime_params_config:
+                from src.risk.regime_detector import MarketRegime, RegimeParameters
+                regime_map = {
+                    "bull": MarketRegime.BULL,
+                    "bear": MarketRegime.BEAR,
+                    "choppy": MarketRegime.CHOPPY,
+                    "volatile": MarketRegime.VOLATILE,
+                }
+                for name, regime_enum in regime_map.items():
+                    if name in regime_params_config:
+                        cfg = regime_params_config[name]
+                        defaults = self.regime_detector.get_regime_parameters(regime_enum)
+                        self.regime_detector.set_regime_parameters(regime_enum, RegimeParameters(
+                            regime=regime_enum,
+                            stop_loss_pct=cfg.get("stop_loss_pct", defaults.stop_loss_pct),
+                            position_size_multiplier=cfg.get("position_size_multiplier", defaults.position_size_multiplier),
+                            min_confidence=cfg.get("min_confidence", defaults.min_confidence),
+                            trailing_stop_enabled=cfg.get("trailing_stop_enabled", defaults.trailing_stop_enabled),
+                            description=defaults.description,
+                        ))
+                logger.info("Regime parameters loaded from config")
             logger.info("Market regime detection enabled")
 
         # Initialize portfolio optimizer and rebalancer
@@ -217,6 +259,11 @@ class TradingEngine:
         account = self.broker.get_account_info()
         self.risk_manager.reset_daily_limits(account.portfolio_value)
 
+        # Restore stop-losses and take-profits from disk, pruning stale symbols
+        broker_positions = self.broker.get_positions()
+        active_symbols = [p.symbol for p in broker_positions] if broker_positions else []
+        self.risk_manager.load_state(active_symbols=active_symbols or None)
+
         self.is_running = True
 
         # Start scheduled retrainer if enabled
@@ -246,6 +293,9 @@ class TradingEngine:
         """Stop the trading engine."""
         logger.info("Stopping Trading Engine...")
         self.is_running = False
+
+        # Persist risk state before shutdown
+        self.risk_manager.save_state()
 
         # Stop scheduled retrainer
         if self.retrainer:
@@ -482,6 +532,10 @@ class TradingEngine:
                 self.notifier.notify_error(
                     error=f"Trading cycle error: {str(e)}"
                 )
+
+        # Persist risk state (stop-losses, take-profits) after each cycle
+        if cycle_results.get("trades"):
+            self.risk_manager.save_state()
 
         return cycle_results
 

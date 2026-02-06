@@ -1,13 +1,16 @@
 """
 Risk management module.
 """
+import json
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, List, TYPE_CHECKING
 from enum import Enum
 from datetime import datetime, timedelta
 
-from config.settings import settings
+from config.settings import settings, DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -834,3 +837,128 @@ class RiskManager:
             "current_vix": self._cached_vix,
             "vix_multiplier": self.calculate_volatility_multiplier() if self._cached_vix else 1.0
         }
+
+    # ── State Persistence ──────────────────────────────────────────────
+
+    STATE_FILE = DATA_DIR / "risk_manager_state.json"
+
+    def save_state(self) -> None:
+        """Persist stop-losses, take-profits, and drawdown state to disk."""
+        state = {
+            "stop_losses": {
+                sym: {
+                    "stop_type": sl.stop_type.value,
+                    "stop_price": sl.stop_price,
+                    "entry_price": sl.entry_price,
+                    "trailing_distance": sl.trailing_distance,
+                }
+                for sym, sl in self.stop_losses.items()
+            },
+            "take_profits": {
+                sym: {
+                    "entry_price": tp.entry_price,
+                    "total_quantity": tp.total_quantity,
+                    "quantity_remaining": tp.quantity_remaining,
+                    "levels": [
+                        {
+                            "target_price": lv.target_price,
+                            "target_pct": lv.target_pct,
+                            "exit_pct": lv.exit_pct,
+                            "triggered": lv.triggered,
+                        }
+                        for lv in tp.levels
+                    ],
+                }
+                for sym, tp in self.take_profits.items()
+            },
+            "peak_portfolio_value": self.peak_portfolio_value,
+            "drawdown_recovery_mode": self.drawdown_recovery_mode,
+            "saved_at": datetime.now().isoformat(),
+        }
+
+        try:
+            self.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self.STATE_FILE.parent), suffix=".tmp"
+            )
+            with os.fdopen(fd, "w") as f:
+                json.dump(state, f, indent=2)
+            os.replace(tmp_path, self.STATE_FILE)
+            logger.debug(
+                f"Risk state saved: {len(self.stop_losses)} stops, "
+                f"{len(self.take_profits)} TPs"
+            )
+        except Exception as e:
+            logger.error(f"Failed to save risk state: {e}")
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    def load_state(self, active_symbols: Optional[List[str]] = None) -> None:
+        """
+        Restore stop-losses, take-profits, and drawdown state from disk.
+
+        Args:
+            active_symbols: If provided, only restore state for these symbols
+                           (prunes stale entries for positions that no longer exist).
+        """
+        if not self.STATE_FILE.exists():
+            return
+
+        try:
+            with open(self.STATE_FILE, "r") as f:
+                state = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load risk state: {e}")
+            return
+
+        # Restore stop-losses
+        for sym, sl_data in state.get("stop_losses", {}).items():
+            if active_symbols is not None and sym not in active_symbols:
+                continue
+            try:
+                self.stop_losses[sym] = StopLoss(
+                    symbol=sym,
+                    stop_type=StopLossType(sl_data["stop_type"]),
+                    stop_price=sl_data["stop_price"],
+                    entry_price=sl_data["entry_price"],
+                    trailing_distance=sl_data.get("trailing_distance"),
+                )
+            except (KeyError, ValueError) as e:
+                logger.warning(f"Skipping invalid stop-loss for {sym}: {e}")
+
+        # Restore take-profits
+        for sym, tp_data in state.get("take_profits", {}).items():
+            if active_symbols is not None and sym not in active_symbols:
+                continue
+            try:
+                levels = [
+                    TakeProfitLevel(
+                        target_price=lv["target_price"],
+                        target_pct=lv["target_pct"],
+                        exit_pct=lv["exit_pct"],
+                        triggered=lv.get("triggered", False),
+                    )
+                    for lv in tp_data.get("levels", [])
+                ]
+                self.take_profits[sym] = TakeProfitOrder(
+                    symbol=sym,
+                    entry_price=tp_data["entry_price"],
+                    total_quantity=tp_data["total_quantity"],
+                    levels=levels,
+                    quantity_remaining=tp_data.get(
+                        "quantity_remaining", tp_data["total_quantity"]
+                    ),
+                )
+            except (KeyError, ValueError) as e:
+                logger.warning(f"Skipping invalid take-profit for {sym}: {e}")
+
+        # Restore drawdown tracking
+        peak = state.get("peak_portfolio_value", 0.0)
+        if peak > 0:
+            self.peak_portfolio_value = peak
+        self.drawdown_recovery_mode = state.get("drawdown_recovery_mode", False)
+
+        logger.info(
+            f"Risk state loaded: {len(self.stop_losses)} stops, "
+            f"{len(self.take_profits)} TPs, peak=${self.peak_portfolio_value:,.2f}"
+        )
