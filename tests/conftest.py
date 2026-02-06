@@ -126,9 +126,13 @@ def sample_equity_curve():
 def mock_broker():
     """
     Create SimulatedBroker instance with initial capital.
+    Mocks _load_state and _save_state to avoid file I/O during tests.
     """
+    from unittest.mock import patch
     from src.broker.simulated_broker import SimulatedBroker
-    return SimulatedBroker(initial_capital=100000)
+    with patch.object(SimulatedBroker, '_load_state'), \
+         patch.object(SimulatedBroker, '_save_state'):
+        return SimulatedBroker(initial_capital=100000)
 
 
 @pytest.fixture
@@ -177,8 +181,8 @@ def sample_features_df(sample_ohlcv_data):
     from src.data.feature_engineer import FeatureEngineer
 
     fe = FeatureEngineer()
-    features = fe.create_features(sample_ohlcv_data)
-    return features
+    features = fe.add_all_features(sample_ohlcv_data)
+    return features.dropna()
 
 
 @pytest.fixture
@@ -190,8 +194,11 @@ def small_training_data():
     n_samples = 100
     n_features = 10
 
-    X = np.random.randn(n_samples, n_features)
-    y = (X[:, 0] + X[:, 1] > 0).astype(int)  # Simple linear decision boundary
+    X_arr = np.random.randn(n_samples, n_features)
+    y_arr = (X_arr[:, 0] + X_arr[:, 1] > 0).astype(int)  # Simple linear decision boundary
+
+    X = pd.DataFrame(X_arr, columns=[f"feat_{i}" for i in range(n_features)])
+    y = pd.Series(y_arr, name="label")
 
     return X, y
 

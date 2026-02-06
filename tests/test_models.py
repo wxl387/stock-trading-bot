@@ -44,19 +44,19 @@ class TestXGBoostModel:
         assert probas.shape == (len(y), 2)
         assert all(0 <= p <= 1 for p in probas.flatten())
 
-    def test_save_load(self, small_training_data, tmp_model_dir):
+    def test_save_load(self, small_training_data):
         """Test model save and load."""
         X, y = small_training_data
         model = XGBoostModel()
         model.train(X, y)
 
-        # Save
+        # Save (uses MODELS_DIR from settings)
         model_name = "test_xgboost"
-        model.save(model_name, model_dir=str(tmp_model_dir))
+        model.save(model_name)
 
         # Load into new model
         model2 = XGBoostModel()
-        model2.load(model_name, model_dir=str(tmp_model_dir))
+        model2.load(model_name)
 
         assert model2.is_trained is True
 
@@ -80,9 +80,12 @@ class TestXGBoostModel:
         X, y = small_training_data
         model = XGBoostModel()
 
-        scores = model.cross_validate(X, y, cv=3)
+        # Production API uses n_splits, not cv
+        scores = model.cross_validate(X, y, n_splits=3)
         assert 'accuracy' in scores
-        assert 0 <= scores['accuracy'] <= 1
+        # cross_validate returns lists of per-fold scores
+        assert len(scores['accuracy']) == 3
+        assert all(0 <= s <= 1 for s in scores['accuracy'])
 
     def test_model_not_trained_error(self, small_training_data):
         """Test error when predicting without training."""
@@ -108,7 +111,8 @@ class TestLSTMModel:
         """Test LSTM model architecture builds correctly."""
         from src.ml.models.lstm_model import LSTMModel
         model = LSTMModel(sequence_length=20, n_features=10)
-        model._build_model()
+        # Production method is build_model(), not _build_model()
+        model.build_model()
 
         assert model.model is not None
 
@@ -137,8 +141,8 @@ class TestLSTMModel:
             n_features=X.shape[2]
         )
 
-        # Train with minimal epochs for speed
-        model.train(X, y, epochs=2, batch_size=16, verbose=0)
+        # Production train() does not accept verbose kwarg
+        model.train(X, y, epochs=2, batch_size=16)
 
         assert model.is_trained is True
 
@@ -161,7 +165,8 @@ class TestCNNModel:
         """Test CNN model architecture builds correctly."""
         from src.ml.models.cnn_model import CNNModel
         model = CNNModel(sequence_length=20, n_features=10)
-        model._build_model()
+        # Production method is build_model(), not _build_model()
+        model.build_model()
 
         assert model.model is not None
 
@@ -176,7 +181,8 @@ class TestCNNModel:
             n_features=X.shape[2]
         )
 
-        model.train(X, y, epochs=2, batch_size=16, verbose=0)
+        # Production train() does not accept verbose kwarg
+        model.train(X, y, epochs=2, batch_size=16)
 
         assert model.is_trained is True
 
@@ -218,9 +224,10 @@ class TestEnsembleModel:
         xgb = XGBoostModel()
         xgb.train(X, y)
 
+        # Production uses model_weights, not weights
         ensemble = EnsembleModel(
             voting_method=VotingMethod.WEIGHTED,
-            weights={'xgboost': 0.5, 'lstm': 0.3, 'cnn': 0.2}
+            model_weights={'xgboost': 0.5, 'lstm': 0.3, 'cnn': 0.2}
         )
         ensemble.xgboost_model = xgb
 
@@ -238,7 +245,7 @@ class TestModelNotTrainedError:
     def test_xgboost_not_trained(self):
         """Test XGBoost raises error when not trained."""
         model = XGBoostModel()
-        X = np.random.randn(10, 5)
+        X = pd.DataFrame(np.random.randn(10, 5), columns=[f"f{i}" for i in range(5)])
 
         with pytest.raises(Exception):
             model.predict(X)
@@ -264,7 +271,7 @@ class TestModelMetrics:
         model.train(X, y)
 
         predictions = model.predict(X)
-        accuracy = (predictions == y).mean()
+        accuracy = (predictions == y.values).mean()
 
         # Training accuracy should be reasonable
         assert accuracy > 0.5
@@ -274,9 +281,10 @@ class TestModelMetrics:
         X, y = small_training_data
         model = XGBoostModel()
 
-        scores_3 = model.cross_validate(X, y, cv=3)
-        scores_5 = model.cross_validate(X, y, cv=5)
+        # Production API uses n_splits, not cv
+        scores_3 = model.cross_validate(X, y, n_splits=3)
+        scores_5 = model.cross_validate(X, y, n_splits=5)
 
-        # Both should produce valid results
+        # Both should produce valid results (returns lists)
         assert 'accuracy' in scores_3
         assert 'accuracy' in scores_5

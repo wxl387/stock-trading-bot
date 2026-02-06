@@ -67,10 +67,10 @@ class BenchmarkComparison:
             from src.data.data_fetcher import DataFetcher
             fetcher = DataFetcher()
 
-            df = fetcher.fetch_stock_data(
+            df = fetcher.fetch_historical(
                 symbol=self.benchmark_symbol,
-                start_date=start_date,
-                end_date=end_date
+                start_date=start_date.strftime('%Y-%m-%d') if start_date else None,
+                end_date=end_date.strftime('%Y-%m-%d') if end_date else None,
             )
 
             if df is not None and not df.empty:

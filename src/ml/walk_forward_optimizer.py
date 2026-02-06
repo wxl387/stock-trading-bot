@@ -228,11 +228,11 @@ class WalkForwardOptimizer:
         }
 
     def _build_feature_space(self, trial: optuna.Trial) -> Dict:
-        """Feature group toggle search space."""
+        """Feature group toggle search space (aligned with production flags)."""
         return {
-            "include_macro": trial.suggest_categorical("include_macro", [True, False]),
+            "include_macro": False,
             "include_cross_asset": trial.suggest_categorical("include_cross_asset", [True, False]),
-            "include_interactions": trial.suggest_categorical("include_interactions", [True, False]),
+            "include_interactions": False,
             "include_lagged": trial.suggest_categorical("include_lagged", [True, False]),
         }
 
@@ -250,9 +250,9 @@ class WalkForwardOptimizer:
                 df = feature_engineer.add_all_features_extended(
                     df, symbol=symbol,
                     include_sentiment=False,
-                    include_macro=True,
+                    include_macro=False,
                     include_cross_asset=True,
-                    include_interactions=True,
+                    include_interactions=False,
                     include_lagged=True,
                     use_cache=True
                 )
@@ -330,9 +330,9 @@ class WalkForwardOptimizer:
         df = feature_engineer.add_all_features_extended(
             df, symbol=symbol,
             include_sentiment=False,
-            include_macro=feature_flags.get("include_macro", True),
+            include_macro=feature_flags.get("include_macro", False),
             include_cross_asset=feature_flags.get("include_cross_asset", True),
-            include_interactions=feature_flags.get("include_interactions", True),
+            include_interactions=feature_flags.get("include_interactions", False),
             include_lagged=feature_flags.get("include_lagged", True),
             use_cache=True
         )
@@ -760,10 +760,10 @@ class WalkForwardOptimizer:
         feature_flags = None
         if self.optimize_features:
             feature_flags = {
-                "include_macro": trial.params["include_macro"],
-                "include_cross_asset": trial.params["include_cross_asset"],
-                "include_interactions": trial.params["include_interactions"],
-                "include_lagged": trial.params["include_lagged"],
+                "include_macro": trial.params.get("include_macro", False),
+                "include_cross_asset": trial.params.get("include_cross_asset", True),
+                "include_interactions": trial.params.get("include_interactions", False),
+                "include_lagged": trial.params.get("include_lagged", True),
             }
 
         return {

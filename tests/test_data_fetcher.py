@@ -6,114 +6,106 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
+from pathlib import Path
+import tempfile
 
 from src.data.data_fetcher import DataFetcher
+
+
+@pytest.fixture
+def fetcher(tmp_path):
+    """Create DataFetcher with a temp cache directory."""
+    return DataFetcher(cache_dir=tmp_path / "cache")
+
+
+def _make_mock_df(n=100):
+    """Create mock OHLCV DataFrame for tests."""
+    dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+    return pd.DataFrame({
+        'Open': np.random.randn(n) + 150,
+        'High': np.random.randn(n) + 152,
+        'Low': np.random.randn(n) + 148,
+        'Close': np.random.randn(n) + 150,
+        'Volume': np.random.randint(1000000, 10000000, n)
+    }, index=dates)
 
 
 class TestDataFetcherInitialization:
     """Tests for DataFetcher initialization."""
 
-    def test_initialization(self):
+    def test_initialization(self, tmp_path):
         """Test DataFetcher initializes correctly."""
-        fetcher = DataFetcher()
+        fetcher = DataFetcher(cache_dir=tmp_path / "cache")
         assert fetcher is not None
 
 
 class TestFetchStockData:
     """Tests for fetching stock data."""
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_fetch_stock_data(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_fetch_stock_data(self, mock_ticker_cls, fetcher):
         """Test fetching stock data (mocked)."""
-        # Create mock response
-        dates = pd.date_range(end=datetime.now(), periods=100, freq='D')
-        mock_data = pd.DataFrame({
-            'Open': np.random.randn(100) + 150,
-            'High': np.random.randn(100) + 152,
-            'Low': np.random.randn(100) + 148,
-            'Close': np.random.randn(100) + 150,
-            'Volume': np.random.randint(1000000, 10000000, 100)
-        }, index=dates)
+        mock_df = _make_mock_df(100)
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = mock_df
+        mock_ticker_cls.return_value = mock_ticker
 
-        mock_yf.return_value = mock_data
-
-        fetcher = DataFetcher()
-        data = fetcher.fetch_stock_data('AAPL')
+        data = fetcher.fetch_historical('AAPL', use_cache=False)
 
         assert data is not None
         assert isinstance(data, pd.DataFrame)
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_fetch_with_date_range(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_fetch_with_date_range(self, mock_ticker_cls, fetcher):
         """Test fetching with specific date range."""
-        dates = pd.date_range(end=datetime.now(), periods=50, freq='D')
-        mock_data = pd.DataFrame({
-            'Open': [150] * 50,
-            'High': [152] * 50,
-            'Low': [148] * 50,
-            'Close': [150] * 50,
-            'Volume': [1000000] * 50
-        }, index=dates)
+        mock_df = _make_mock_df(50)
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = mock_df
+        mock_ticker_cls.return_value = mock_ticker
 
-        mock_yf.return_value = mock_data
+        start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+        end_date = datetime.now().strftime('%Y-%m-%d')
 
-        fetcher = DataFetcher()
-        start_date = datetime.now() - timedelta(days=60)
-        end_date = datetime.now()
-
-        data = fetcher.fetch_stock_data(
+        data = fetcher.fetch_historical(
             'AAPL',
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            use_cache=False
         )
 
         assert data is not None
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_fetch_returns_ohlcv(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_fetch_returns_ohlcv(self, mock_ticker_cls, fetcher):
         """Test that fetched data has OHLCV columns."""
-        dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-        mock_data = pd.DataFrame({
-            'Open': [150] * 30,
-            'High': [152] * 30,
-            'Low': [148] * 30,
-            'Close': [150] * 30,
-            'Volume': [1000000] * 30
-        }, index=dates)
+        mock_df = _make_mock_df(30)
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = mock_df
+        mock_ticker_cls.return_value = mock_ticker
 
-        mock_yf.return_value = mock_data
+        data = fetcher.fetch_historical('AAPL', use_cache=False)
 
-        fetcher = DataFetcher()
-        data = fetcher.fetch_stock_data('AAPL')
-
-        # Check for required columns (case may vary)
-        columns_lower = [c.lower() for c in data.columns]
-        assert 'open' in columns_lower or 'Open' in data.columns
-        assert 'close' in columns_lower or 'Close' in data.columns
+        # Production standardizes to lowercase
+        assert 'open' in data.columns
+        assert 'close' in data.columns
 
 
 class TestDataCaching:
     """Tests for data caching functionality."""
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_data_caching(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_data_caching(self, mock_ticker_cls, fetcher):
         """Test that data is cached."""
-        dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-        mock_data = pd.DataFrame({
-            'Close': [150] * 30
-        }, index=dates)
+        mock_df = _make_mock_df(30)
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = mock_df
+        mock_ticker_cls.return_value = mock_ticker
 
-        mock_yf.return_value = mock_data
+        # First call (fetches and caches)
+        data1 = fetcher.fetch_historical('AAPL', use_cache=True)
 
-        fetcher = DataFetcher()
-
-        # First call
-        data1 = fetcher.fetch_stock_data('AAPL')
-        call_count_1 = mock_yf.call_count
-
-        # Second call (should use cache if implemented)
-        data2 = fetcher.fetch_stock_data('AAPL')
-        call_count_2 = mock_yf.call_count
+        # Second call (should use cache)
+        data2 = fetcher.fetch_historical('AAPL', use_cache=True)
 
         # Data should be equal
         if data1 is not None and data2 is not None:
@@ -123,23 +115,19 @@ class TestDataCaching:
 class TestMultipleSymbols:
     """Tests for fetching multiple symbols."""
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_fetch_multiple_symbols(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_fetch_multiple_symbols(self, mock_ticker_cls, fetcher):
         """Test fetching data for multiple symbols."""
-        dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-        mock_data = pd.DataFrame({
-            'Close': [150] * 30
-        }, index=dates)
-
-        mock_yf.return_value = mock_data
-
-        fetcher = DataFetcher()
+        mock_df = _make_mock_df(30)
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = mock_df
+        mock_ticker_cls.return_value = mock_ticker
 
         symbols = ['AAPL', 'MSFT', 'GOOGL']
         data = {}
 
         for symbol in symbols:
-            data[symbol] = fetcher.fetch_stock_data(symbol)
+            data[symbol] = fetcher.fetch_historical(symbol, use_cache=False)
 
         assert len(data) == 3
         for symbol in symbols:
@@ -149,79 +137,72 @@ class TestMultipleSymbols:
 class TestErrorHandling:
     """Tests for error handling."""
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_invalid_symbol(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_invalid_symbol(self, mock_ticker_cls, fetcher):
         """Test handling of invalid symbol."""
-        mock_yf.return_value = pd.DataFrame()  # Empty result
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = pd.DataFrame()  # Empty result
+        mock_ticker_cls.return_value = mock_ticker
 
-        fetcher = DataFetcher()
-        data = fetcher.fetch_stock_data('INVALID_SYMBOL_XYZ')
+        data = fetcher.fetch_historical('INVALID_SYMBOL_XYZ', use_cache=False)
 
-        # Should return None or empty DataFrame
-        assert data is None or data.empty
+        # Should return empty DataFrame
+        assert data.empty
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_network_error(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_network_error(self, mock_ticker_cls, fetcher):
         """Test handling of network errors."""
-        mock_yf.side_effect = Exception("Network error")
+        mock_ticker = Mock()
+        mock_ticker.history.side_effect = Exception("Network error")
+        mock_ticker_cls.return_value = mock_ticker
 
-        fetcher = DataFetcher()
+        # Production raises on error
+        with pytest.raises(Exception):
+            fetcher.fetch_historical('AAPL', use_cache=False)
 
-        # Should handle gracefully
-        try:
-            data = fetcher.fetch_stock_data('AAPL')
-            assert data is None
-        except Exception:
-            pass  # Some implementations may raise
-
-    @patch('src.data.data_fetcher.yf.download')
-    def test_empty_date_range(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_empty_date_range(self, mock_ticker_cls, fetcher):
         """Test handling of empty date range."""
-        mock_yf.return_value = pd.DataFrame()
-
-        fetcher = DataFetcher()
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = pd.DataFrame()
+        mock_ticker_cls.return_value = mock_ticker
 
         # Future dates should return empty
-        data = fetcher.fetch_stock_data(
+        data = fetcher.fetch_historical(
             'AAPL',
-            start_date=datetime.now() + timedelta(days=30),
-            end_date=datetime.now() + timedelta(days=60)
+            start_date=(datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d'),
+            end_date=(datetime.now() + timedelta(days=60)).strftime('%Y-%m-%d'),
+            use_cache=False
         )
 
-        assert data is None or data.empty
+        assert data.empty
 
 
 class TestDataQuality:
     """Tests for data quality checks."""
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_data_has_index(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_data_has_index(self, mock_ticker_cls, fetcher):
         """Test fetched data has datetime index."""
-        dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-        mock_data = pd.DataFrame({
-            'Close': [150] * 30
-        }, index=dates)
+        mock_df = _make_mock_df(30)
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = mock_df
+        mock_ticker_cls.return_value = mock_ticker
 
-        mock_yf.return_value = mock_data
-
-        fetcher = DataFetcher()
-        data = fetcher.fetch_stock_data('AAPL')
+        data = fetcher.fetch_historical('AAPL', use_cache=False)
 
         if data is not None and not data.empty:
             assert isinstance(data.index, pd.DatetimeIndex)
 
-    @patch('src.data.data_fetcher.yf.download')
-    def test_data_sorted_by_date(self, mock_yf):
+    @patch('src.data.data_fetcher.yf.Ticker')
+    def test_data_sorted_by_date(self, mock_ticker_cls, fetcher):
         """Test data is sorted by date."""
-        dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-        mock_data = pd.DataFrame({
-            'Close': list(range(30))
-        }, index=dates)
+        mock_df = _make_mock_df(30)
+        mock_ticker = Mock()
+        mock_ticker.history.return_value = mock_df
+        mock_ticker_cls.return_value = mock_ticker
 
-        mock_yf.return_value = mock_data
-
-        fetcher = DataFetcher()
-        data = fetcher.fetch_stock_data('AAPL')
+        data = fetcher.fetch_historical('AAPL', use_cache=False)
 
         if data is not None and not data.empty:
             assert data.index.is_monotonic_increasing

@@ -42,7 +42,15 @@ def prepare_data(
             logger.warning(f"No data for {symbol}")
             continue
 
-        df = feature_engineer.add_all_features(df)
+        df = feature_engineer.add_all_features_extended(
+            df,
+            symbol=symbol,
+            include_sentiment=False,
+            include_macro=False,
+            include_cross_asset=True,
+            include_interactions=False,
+            include_lagged=True,
+        )
         df["future_returns"] = df["close"].shift(-prediction_horizon) / df["close"] - 1
         df["label"] = (df["future_returns"] > 0).astype(int)
         df = df.dropna()

@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
 
-from src.strategy.ml_strategy import MLStrategy
+from src.strategy.ml_strategy import MLStrategy, SignalType, TradingSignal
 
 
 class TestMLStrategyInitialization:
@@ -39,92 +39,161 @@ class TestMLStrategyInitialization:
 class TestSignalGeneration:
     """Tests for signal generation."""
 
-    def test_generate_signals_buy(self, sample_features_df):
-        """Test generating buy signals."""
+    def test_generate_signals_buy(self):
+        """Test generating buy signals via generate_signal (which takes a symbol)."""
         strategy = MLStrategy(confidence_threshold=0.5)
 
-        # Mock model to return BUY signal with high confidence
+        # Mock both model and data_fetcher since generate_signal fetches data internally
         mock_model = Mock()
         mock_model.predict.return_value = np.array([1])  # BUY
         mock_model.predict_proba.return_value = np.array([[0.2, 0.8]])  # 80% confidence
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        signal = strategy.generate_signal(sample_features_df)
+        # Mock data fetcher to return sample data
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
+
+        signal = strategy.generate_signal("AAPL")
 
         assert signal is not None
-        assert signal.action in ['BUY', 'SELL', 'HOLD']
+        assert signal.signal in [SignalType.BUY, SignalType.SELL, SignalType.HOLD]
 
-    def test_generate_signals_sell(self, sample_features_df):
+    def test_generate_signals_sell(self):
         """Test generating sell signals."""
         strategy = MLStrategy(confidence_threshold=0.5)
 
         mock_model = Mock()
         mock_model.predict.return_value = np.array([0])  # SELL
         mock_model.predict_proba.return_value = np.array([[0.8, 0.2]])
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        signal = strategy.generate_signal(sample_features_df)
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
+
+        signal = strategy.generate_signal("AAPL")
         assert signal is not None
 
-    def test_generate_signals_hold_low_confidence(self, sample_features_df):
+    def test_generate_signals_hold_low_confidence(self):
         """Test HOLD signal when confidence is low."""
-        strategy = MLStrategy(confidence_threshold=0.7)
+        strategy = MLStrategy(confidence_threshold=0.7, min_confidence_sell=0.7)
 
         mock_model = Mock()
         mock_model.predict.return_value = np.array([1])
         mock_model.predict_proba.return_value = np.array([[0.45, 0.55]])  # Low confidence
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        signal = strategy.generate_signal(sample_features_df)
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
+
+        signal = strategy.generate_signal("AAPL")
 
         # Should hold due to low confidence
-        assert signal.action == 'HOLD' or signal.confidence < 0.7
+        assert signal.signal == SignalType.HOLD or signal.confidence < 0.7
 
 
 class TestConfidenceThreshold:
     """Tests for confidence threshold handling."""
 
-    def test_confidence_threshold_high(self, sample_features_df):
+    def test_confidence_threshold_high(self):
         """Test high confidence threshold filters signals."""
-        strategy = MLStrategy(confidence_threshold=0.9)
+        strategy = MLStrategy(confidence_threshold=0.9, min_confidence_sell=0.9)
 
         mock_model = Mock()
         mock_model.predict.return_value = np.array([1])
         mock_model.predict_proba.return_value = np.array([[0.15, 0.85]])  # 85% < 90%
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        signal = strategy.generate_signal(sample_features_df)
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
+
+        signal = strategy.generate_signal("AAPL")
 
         # Should HOLD because confidence < threshold
-        assert signal.action == 'HOLD'
+        assert signal.signal == SignalType.HOLD
 
-    def test_confidence_threshold_met(self, sample_features_df):
+    def test_confidence_threshold_met(self):
         """Test signal generated when threshold is met."""
         strategy = MLStrategy(confidence_threshold=0.6)
 
         mock_model = Mock()
         mock_model.predict.return_value = np.array([1])
         mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])  # 70% > 60%
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        signal = strategy.generate_signal(sample_features_df)
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
+
+        signal = strategy.generate_signal("AAPL")
 
         # Should generate BUY signal
-        assert signal.action == 'BUY'
+        assert signal.signal == SignalType.BUY
 
 
 class TestEnsembleLoading:
     """Tests for ensemble model loading."""
 
-    def test_load_ensemble(self, tmp_model_dir, small_training_data):
+    def test_load_ensemble(self, small_training_data):
         """Test loading ensemble model."""
-        # First save a model
         from src.ml.models.xgboost_model import XGBoostModel
 
         X, y = small_training_data
         model = XGBoostModel()
         model.train(X, y)
-        model.save("test_model", model_dir=str(tmp_model_dir))
 
         strategy = MLStrategy()
 
@@ -142,105 +211,150 @@ class TestSignalWithNoData:
         mock_model = Mock()
         strategy.model = mock_model
 
-        # Empty DataFrame
-        empty_df = pd.DataFrame()
+        # Mock data_fetcher to return empty DF
+        mock_fetcher = Mock()
+        mock_fetcher.fetch_historical.return_value = pd.DataFrame()
+        strategy.data_fetcher = mock_fetcher
 
-        # Should handle gracefully
-        try:
-            signal = strategy.generate_signal(empty_df)
-            # Either returns HOLD or raises an exception
-            assert signal is None or signal.action == 'HOLD'
-        except (ValueError, KeyError):
-            pass  # Expected for empty data
+        # Should return HOLD when no data available
+        signal = strategy.generate_signal("AAPL")
+        assert signal is not None
+        assert signal.signal == SignalType.HOLD
 
-    def test_signal_with_nan_data(self, sample_features_df):
+    def test_signal_with_nan_data(self):
         """Test signal generation with NaN values."""
         strategy = MLStrategy()
 
         mock_model = Mock()
         mock_model.predict.return_value = np.array([1])
         mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        # Introduce NaN
-        df_with_nan = sample_features_df.copy()
-        df_with_nan.iloc[-1, 0] = np.nan
+        # Mock data fetcher with NaN-containing data
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_df.iloc[-1, 0] = np.nan
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
 
         # Should handle NaN gracefully
-        try:
-            signal = strategy.generate_signal(df_with_nan)
-            assert signal is not None
-        except (ValueError, Exception):
-            pass  # May raise on NaN
+        signal = strategy.generate_signal("AAPL")
+        assert signal is not None
 
 
 class TestMultipleSymbols:
     """Tests for handling multiple symbols."""
 
-    def test_signals_for_multiple_symbols(self, mock_market_data):
+    def test_signals_for_multiple_symbols(self):
         """Test generating signals for multiple symbols."""
         strategy = MLStrategy(confidence_threshold=0.5)
 
         mock_model = Mock()
         mock_model.predict.return_value = np.array([1])
         mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        signals = {}
-        for symbol, data in mock_market_data.items():
-            from src.data.feature_engineer import FeatureEngineer
-            fe = FeatureEngineer()
-            features = fe.create_features(data)
-            if not features.empty:
-                signal = strategy.generate_signal(features)
-                signals[symbol] = signal
+        # Mock data fetcher
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
+
+        symbols = ['AAPL', 'MSFT', 'GOOGL']
+        signals = strategy.generate_signals(symbols)
 
         # Should generate signals for all symbols
-        assert len(signals) == len(mock_market_data)
+        assert len(signals) == len(symbols)
 
 
 class TestSignalAttributes:
     """Tests for signal object attributes."""
 
-    def test_signal_has_required_attributes(self, sample_features_df):
+    def test_signal_has_required_attributes(self):
         """Test signal object has required attributes."""
         strategy = MLStrategy()
 
         mock_model = Mock()
         mock_model.predict.return_value = np.array([1])
         mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        signal = strategy.generate_signal(sample_features_df)
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
 
-        # Check required attributes
-        assert hasattr(signal, 'action')
+        signal = strategy.generate_signal("AAPL")
+
+        # Check required attributes (production uses .signal not .action)
+        assert hasattr(signal, 'signal')
         assert hasattr(signal, 'confidence')
-        assert signal.action in ['BUY', 'SELL', 'HOLD']
+        assert signal.signal in [SignalType.BUY, SignalType.SELL, SignalType.HOLD]
         assert 0 <= signal.confidence <= 1
 
-    def test_signal_symbol_tracking(self, sample_features_df):
-        """Test signal tracks symbol if provided."""
+    def test_signal_symbol_tracking(self):
+        """Test signal tracks symbol."""
         strategy = MLStrategy()
 
         mock_model = Mock()
         mock_model.predict.return_value = np.array([1])
         mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])
+        mock_model.feature_names = None
         strategy.model = mock_model
 
-        signal = strategy.generate_signal(sample_features_df, symbol='AAPL')
+        mock_fetcher = Mock()
+        n = 250
+        dates = pd.date_range(end=datetime.now(), periods=n, freq='D')
+        mock_df = pd.DataFrame({
+            'open': np.random.randn(n).cumsum() + 100,
+            'high': np.random.randn(n).cumsum() + 101,
+            'low': np.random.randn(n).cumsum() + 99,
+            'close': np.random.randn(n).cumsum() + 100,
+            'volume': np.random.randint(1e6, 1e7, n),
+        }, index=dates)
+        mock_fetcher.fetch_historical.return_value = mock_df
+        strategy.data_fetcher = mock_fetcher
 
-        if hasattr(signal, 'symbol'):
-            assert signal.symbol == 'AAPL'
+        # generate_signal takes just a symbol string
+        signal = strategy.generate_signal('AAPL')
+
+        assert signal.symbol == 'AAPL'
 
 
 class TestModelNotLoaded:
     """Tests for handling when model is not loaded."""
 
-    def test_generate_signal_no_model(self, sample_features_df):
+    def test_generate_signal_no_model(self):
         """Test signal generation without loaded model."""
         strategy = MLStrategy()
         strategy.model = None
 
         with pytest.raises(Exception):
-            strategy.generate_signal(sample_features_df)
+            strategy.generate_signal("AAPL")

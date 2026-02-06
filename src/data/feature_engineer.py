@@ -768,7 +768,7 @@ class FeatureEngineer:
             # Days to earnings
             if fundamentals.days_to_earnings is not None:
                 df["days_to_earnings"] = float(fundamentals.days_to_earnings)
-                df["near_earnings"] = (fundamentals.days_to_earnings <= 14).astype(int)
+                df["near_earnings"] = int(fundamentals.days_to_earnings <= 14)
             else:
                 df["days_to_earnings"] = 90.0
                 df["near_earnings"] = 0

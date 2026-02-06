@@ -168,7 +168,13 @@ class DataFetcher:
         """
         ticker = yf.Ticker(symbol)
         info = ticker.fast_info
-        return info.get("lastPrice", info.get("regularMarketPrice", 0))
+        try:
+            return info.last_price
+        except (AttributeError, KeyError):
+            try:
+                return info.regular_market_previous_close
+            except (AttributeError, KeyError):
+                return 0.0
 
     def get_latest_prices(self, symbols: List[str]) -> Dict[str, float]:
         """

@@ -237,10 +237,10 @@ class DegradationMonitor:
 
                 df = self.feature_engineer.add_all_features_extended(
                     df, symbol=symbol,
-                    include_sentiment=True,
-                    include_macro=True,
+                    include_sentiment=False,
+                    include_macro=False,
                     include_cross_asset=True,
-                    include_interactions=True,
+                    include_interactions=False,
                     include_lagged=True,
                     use_cache=True
                 )
