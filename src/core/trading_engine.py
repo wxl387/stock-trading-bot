@@ -512,6 +512,9 @@ class TradingEngine:
                                 logger.error(f"Rebalance trade error for {t_symbol}: {e}")
                                 cycle_results["errors"].append(f"Rebalance {t_symbol}: {str(e)}")
 
+                        # Record that rebalancing occurred
+                        self.portfolio_rebalancer.record_rebalance()
+
             # Generate trading signals (use active symbols from symbol manager if available)
             if not getattr(self, 'model_loaded', False):
                 logger.warning("Skipping signal generation — no ML model loaded")

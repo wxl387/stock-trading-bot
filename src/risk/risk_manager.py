@@ -783,7 +783,7 @@ class RiskManager:
 
                     # Ensure at least 1 share if we have any
                     if sell_qty == 0 and tp.quantity_remaining > 0:
-                        sell_qty = tp.quantity_remaining
+                        sell_qty = 1
 
                     if sell_qty > 0:
                         level.triggered = True

@@ -427,12 +427,12 @@ class TestTakeProfits:
         rm.remove_take_profit("NOPE")
 
     def test_tp_small_quantity_ensures_at_least_1(self, rm):
-        """If exit_pct rounds to 0 shares but remaining > 0, sell remaining."""
+        """If exit_pct rounds to 0 shares but remaining > 0, sell 1 share."""
         rm.set_take_profit("AAPL", 100.0, 2, tp_levels=[(0.05, 0.01)])
         sales = rm.check_take_profits({"AAPL": 106.0})
-        # int(2 * 0.01) = 0 -> fallback to quantity_remaining (2)
+        # int(2 * 0.01) = 0 -> fallback to 1 share (not all remaining)
         assert len(sales) == 1
-        assert sales[0][1] == 2
+        assert sales[0][1] == 1
 
 
 # ===================================================================

@@ -280,6 +280,12 @@ class PortfolioOptimizer:
                                 adjusted_weights[symbol] + redistribution
                             )
 
+                # Re-normalize to ensure weights sum to 1.0
+                weight_sum = sum(adjusted_weights.values())
+                if weight_sum > 0 and abs(weight_sum - 1.0) > 1e-9:
+                    for symbol in adjusted_weights:
+                        adjusted_weights[symbol] /= weight_sum
+
                 portfolio_weights.weights = adjusted_weights
                 portfolio_weights.metadata['max_position_override'] = max_position
                 portfolio_weights.metadata['regime_adjustment'] = 'bear_concentration_limit'

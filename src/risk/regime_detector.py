@@ -213,6 +213,13 @@ class RegimeDetector:
         plus_dm[plus_dm < 0] = 0
         minus_dm[minus_dm < 0] = 0
 
+        # Mutual exclusivity: only the larger DM stays positive
+        both_positive = (plus_dm > 0) & (minus_dm > 0)
+        plus_dm_smaller = both_positive & (plus_dm <= minus_dm)
+        minus_dm_smaller = both_positive & (minus_dm < plus_dm)
+        plus_dm[plus_dm_smaller] = 0
+        minus_dm[minus_dm_smaller] = 0
+
         # Smoothed values
         atr = tr.rolling(window=period).mean()
         atr = atr.replace(0, np.nan)  # Guard against division by zero in early window
@@ -322,6 +329,11 @@ class RegimeDetector:
         minus_dm = -low.diff()
         plus_dm = plus_dm.clip(lower=0)
         minus_dm = minus_dm.clip(lower=0)
+
+        # Mutual exclusivity: only the larger DM stays positive
+        both_positive = (plus_dm > 0) & (minus_dm > 0)
+        plus_dm = plus_dm.where(~(both_positive & (plus_dm <= minus_dm)), 0)
+        minus_dm = minus_dm.where(~(both_positive & (minus_dm < plus_dm)), 0)
 
         atr = tr.rolling(window=period).mean()
         atr = atr.replace(0, np.nan)  # Guard against division by zero in early window

@@ -415,9 +415,9 @@ class PortfolioRebalancer:
         """
         now = datetime.now()
 
-        # If never rebalanced, don't trigger on calendar
+        # If never rebalanced, allow first rebalance to proceed
         if self.last_rebalance is None:
-            return False
+            return True
 
         if self.calendar_frequency == "daily":
             # Rebalance every day

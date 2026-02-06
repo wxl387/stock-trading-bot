@@ -2,6 +2,7 @@
 Notification manager that orchestrates all notification channels.
 """
 import logging
+import threading
 from typing import Optional, Dict, List, Any
 
 from config.settings import Settings
@@ -402,11 +403,14 @@ class NotifierManager:
 
 # Singleton instance
 _notifier: Optional[NotifierManager] = None
+_notifier_lock = threading.Lock()
 
 
 def get_notifier() -> NotifierManager:
     """Get singleton notifier instance."""
     global _notifier
     if _notifier is None:
-        _notifier = NotifierManager()
+        with _notifier_lock:
+            if _notifier is None:
+                _notifier = NotifierManager()
     return _notifier

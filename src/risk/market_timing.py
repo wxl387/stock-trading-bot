@@ -264,12 +264,13 @@ class MarketTimer:
             vix_sma5 = vix_df["close"].rolling(5).mean().iloc[-1]
             vix_sma20 = vix_df["close"].rolling(20).mean().iloc[-1]
 
-            if vix_sma5 > vix_sma20 * 1.05:
-                conditions.vix_trend = "rising"
-            elif vix_sma5 < vix_sma20 * 0.95:
-                conditions.vix_trend = "falling"
-            else:
-                conditions.vix_trend = "neutral"
+            if pd.notna(vix_sma5) and pd.notna(vix_sma20):
+                if vix_sma5 > vix_sma20 * 1.05:
+                    conditions.vix_trend = "rising"
+                elif vix_sma5 < vix_sma20 * 0.95:
+                    conditions.vix_trend = "falling"
+                else:
+                    conditions.vix_trend = "neutral"
 
         except Exception as e:
             logger.warning(f"Error fetching VIX data: {e}")
@@ -293,10 +294,13 @@ class MarketTimer:
             sma50 = spy_df["close"].rolling(50).mean().iloc[-1]
             sma200 = spy_df["close"].rolling(200).mean().iloc[-1]
 
-            # Position vs MAs (as percentage)
-            conditions.spy_vs_sma20 = (conditions.spy_price - sma20) / sma20 * 100
-            conditions.spy_vs_sma50 = (conditions.spy_price - sma50) / sma50 * 100
-            conditions.spy_vs_sma200 = (conditions.spy_price - sma200) / sma200 * 100
+            # Position vs MAs (as percentage) - guard against NaN
+            if pd.notna(sma20) and sma20 != 0:
+                conditions.spy_vs_sma20 = (conditions.spy_price - sma20) / sma20 * 100
+            if pd.notna(sma50) and sma50 != 0:
+                conditions.spy_vs_sma50 = (conditions.spy_price - sma50) / sma50 * 100
+            if pd.notna(sma200) and sma200 != 0:
+                conditions.spy_vs_sma200 = (conditions.spy_price - sma200) / sma200 * 100
 
             # Calculate RSI
             conditions.spy_rsi = self._calculate_rsi(spy_df["close"], 14)
