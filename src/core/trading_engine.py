@@ -85,7 +85,11 @@ class TradingEngine:
 
         # Initialize components
         self.broker: Optional[BaseBroker] = None
-        self.strategy = MLStrategy()
+        ml_config = self.config.get("ml_model", {})
+        self.strategy = MLStrategy(
+            confidence_threshold=ml_config.get("confidence_threshold", 0.6),
+            min_confidence_sell=ml_config.get("min_confidence_sell", 0.55),
+        )
         self.risk_manager = RiskManager(
             max_position_pct=self.config.get("risk_management", {}).get("max_position_pct", 0.10),
             max_daily_loss_pct=self.config.get("risk_management", {}).get("max_daily_loss_pct", 0.05),

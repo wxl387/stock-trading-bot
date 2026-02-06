@@ -259,6 +259,8 @@ class DegradationMonitor:
                 y_test = test_df["label_binary"].values
 
                 # Get predictions
+                prob_up = None
+                preds = None
                 if model_type == "xgboost":
                     probas = model.predict_proba(X_test)
                     if probas is not None and len(probas) > 0:
@@ -277,6 +279,10 @@ class DegradationMonitor:
                         prob_up = probas[:, 1]
                         preds = (prob_up > 0.5).astype(int)
                         y_test = y_seq  # Align with sequences
+
+                if prob_up is None or preds is None:
+                    logger.debug(f"No predictions for {symbol}, skipping")
+                    continue
 
                 all_predictions.extend(preds.tolist())
                 all_actuals.extend(y_test.tolist())

@@ -76,7 +76,7 @@ class SimulatedBroker(BaseBroker):
             buying_power=self.cash,  # Simplified - no margin
             portfolio_value=portfolio_value,
             day_trades_remaining=3,  # PDT rule simulation
-            positions_count=len(self.positions)
+            positions_count=len([p for p in self.positions.values() if p["quantity"] != 0])
         )
 
     def get_positions(self) -> List[Position]:

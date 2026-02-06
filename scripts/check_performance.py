@@ -138,7 +138,7 @@ def main():
     initial_capital = state.get('initial_capital', 100000)
     current_cash = state.get('cash', 0)
     positions = state.get('positions', {})
-    trades = state.get('trade_history', [])
+    trades = state.get('trades', []) or state.get('trade_history', [])
 
     # Get current prices
     symbols = list(positions.keys())

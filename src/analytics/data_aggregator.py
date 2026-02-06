@@ -207,7 +207,7 @@ class DataAggregator:
             with open(self._broker_state_file, 'r') as f:
                 state = json.load(f)
 
-            trades = state.get('trade_history', [])
+            trades = state.get('trades', []) or state.get('trade_history', [])
             if not trades:
                 return pd.DataFrame()
 

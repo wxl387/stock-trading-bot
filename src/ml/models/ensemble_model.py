@@ -339,12 +339,12 @@ class EnsembleModel:
         """Majority voting on predictions."""
         predictions = [(p[:, 1] > 0.5).astype(int) for p in all_probas]
         stacked = np.stack(predictions, axis=1)
-        majority = (np.mean(stacked, axis=1) > 0.5).astype(int)
+        vote_ratio = np.mean(stacked, axis=1)
 
-        # Convert back to probability format
-        result = np.zeros((len(majority), 2))
-        result[:, 1] = majority
-        result[:, 0] = 1 - majority
+        # Return vote ratio as probability (e.g., 3/4 voted up → 0.75)
+        result = np.zeros((len(vote_ratio), 2))
+        result[:, 1] = vote_ratio
+        result[:, 0] = 1 - vote_ratio
         return result
 
     def _soft_vote(self, all_probas: List[np.ndarray]) -> np.ndarray:

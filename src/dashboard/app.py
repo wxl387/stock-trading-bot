@@ -405,7 +405,7 @@ def render_analytics(data_provider):
         )
 
     with col2:
-        volatility = all_metrics.get('annualized_volatility', 0)
+        volatility = all_metrics.get('volatility', 0) or all_metrics.get('annualized_volatility', 0)
         st.metric(
             label="Volatility",
             value=f"{volatility:.2%}"
