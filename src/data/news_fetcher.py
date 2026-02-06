@@ -1,8 +1,9 @@
 """
-News fetcher for BlueSky/viaNexus API (MT Newswires).
+News fetcher supporting Finnhub and BlueSky APIs.
 Fetches financial news articles for sentiment analysis.
 """
 import logging
+import os
 import time
 import json
 from pathlib import Path
@@ -17,22 +18,46 @@ CACHE_DIR = Path(__file__).parent.parent.parent / "data" / "cache"
 
 class NewsFetcher:
     """
-    Fetches financial news from BlueSky/viaNexus API.
+    Fetches financial news from Finnhub (preferred) or BlueSky API.
     """
 
-    def __init__(self, api_token: Optional[str] = None):
-        self.base_url = "https://api.blueskyapi.com/v1/data/core/news"
-        self.token = api_token or self._load_token()
+    def __init__(self, provider: Optional[str] = None, api_token: Optional[str] = None):
+        """
+        Initialize news fetcher.
+
+        Args:
+            provider: 'finnhub' or 'bluesky'. Auto-detects if not specified.
+            api_token: API token. Auto-loads from environment if not specified.
+        """
         self.cache_hours = 4
-        self._request_delay = 0.5  # Rate limiting: 500ms between requests
+        self._request_delay = 0.5  # Rate limiting
+        self._session = requests.Session()
 
-        if not self.token:
-            logger.warning("No BlueSky API token configured. News fetching disabled.")
+        # Auto-detect provider based on available API keys
+        finnhub_key = api_token if provider == "finnhub" else os.getenv("FINNHUB_API_KEY")
+        bluesky_key = api_token if provider == "bluesky" else os.getenv("BLUESKY_API_TOKEN")
 
-    def _load_token(self) -> Optional[str]:
-        """Load API token from environment."""
-        import os
-        return os.environ.get("BLUESKY_API_TOKEN")
+        if provider == "finnhub" or (finnhub_key and provider != "bluesky"):
+            self.provider = "finnhub"
+            self.token = finnhub_key
+            self.base_url = "https://finnhub.io/api/v1/company-news"
+            if self.token:
+                logger.info("NewsFetcher initialized with Finnhub API")
+            else:
+                logger.warning("No Finnhub API key found. News fetching disabled.")
+        elif provider == "bluesky" or bluesky_key:
+            self.provider = "bluesky"
+            self.token = bluesky_key
+            self.base_url = "https://api.blueskyapi.com/v1/data/core/news"
+            if self.token:
+                logger.info("NewsFetcher initialized with BlueSky API")
+            else:
+                logger.warning("No BlueSky API token found. News fetching disabled.")
+        else:
+            self.provider = None
+            self.token = None
+            self.base_url = None
+            logger.warning("No API keys configured. News fetching disabled.")
 
     def fetch_news(self, symbol: str, last: int = 50) -> List[Dict]:
         """
@@ -55,39 +80,18 @@ class NewsFetcher:
             return cached
 
         try:
-            url = f"{self.base_url}/{symbol.lower()}"
-            params = {"token": self.token, "last": last}
-
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-
-            articles = response.json()
-
-            if not isinstance(articles, list):
-                articles = [articles] if articles else []
-
-            # Normalize article format
-            normalized = []
-            for article in articles:
-                normalized.append({
-                    "datetime": article.get("datetime", 0),
-                    "date": datetime.fromtimestamp(
-                        article.get("datetime", 0) / 1000
-                    ).strftime("%Y-%m-%d") if article.get("datetime") else None,
-                    "headline": article.get("headline", ""),
-                    "summary": article.get("summary", ""),
-                    "source": article.get("source", ""),
-                    "symbol": symbol.upper(),
-                    "related": article.get("related", ""),
-                })
+            if self.provider == "finnhub":
+                articles = self._fetch_finnhub(symbol, last)
+            else:
+                articles = self._fetch_bluesky(symbol, last)
 
             # Cache results
-            self._save_cache(symbol, normalized)
+            if articles:
+                self._save_cache(symbol, articles)
+                logger.info(f"Fetched {len(articles)} news articles for {symbol} via {self.provider}")
 
-            logger.info(f"Fetched {len(normalized)} news articles for {symbol}")
             time.sleep(self._request_delay)  # Rate limiting
-
-            return normalized
+            return articles
 
         except requests.exceptions.RequestException as e:
             logger.warning(f"Failed to fetch news for {symbol}: {e}")
@@ -95,6 +99,75 @@ class NewsFetcher:
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"Failed to parse news response for {symbol}: {e}")
             return []
+
+    def _fetch_finnhub(self, symbol: str, last: int) -> List[Dict]:
+        """Fetch news from Finnhub API."""
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=7)  # Last 7 days
+
+        params = {
+            "symbol": symbol.upper(),
+            "from": start_date.strftime("%Y-%m-%d"),
+            "to": end_date.strftime("%Y-%m-%d"),
+            "token": self.token
+        }
+
+        response = self._session.get(self.base_url, params=params, timeout=10)
+        response.raise_for_status()
+
+        articles = response.json()
+        if not isinstance(articles, list):
+            articles = [articles] if articles else []
+
+        # Limit to requested count
+        articles = articles[:last]
+
+        # Normalize to common format
+        normalized = []
+        for article in articles:
+            normalized.append({
+                "datetime": article.get("datetime", 0) * 1000,  # Convert to ms
+                "date": datetime.fromtimestamp(
+                    article.get("datetime", 0)
+                ).strftime("%Y-%m-%d") if article.get("datetime") else None,
+                "headline": article.get("headline", ""),
+                "summary": article.get("summary", ""),
+                "source": article.get("source", ""),
+                "symbol": symbol.upper(),
+                "url": article.get("url", ""),
+                "related": article.get("related", symbol),
+            })
+
+        return normalized
+
+    def _fetch_bluesky(self, symbol: str, last: int) -> List[Dict]:
+        """Fetch news from BlueSky API."""
+        url = f"{self.base_url}/{symbol.lower()}"
+        params = {"token": self.token, "last": last}
+
+        response = self._session.get(url, params=params, timeout=10)
+        response.raise_for_status()
+
+        articles = response.json()
+        if not isinstance(articles, list):
+            articles = [articles] if articles else []
+
+        # Normalize article format
+        normalized = []
+        for article in articles:
+            normalized.append({
+                "datetime": article.get("datetime", 0),
+                "date": datetime.fromtimestamp(
+                    article.get("datetime", 0) / 1000
+                ).strftime("%Y-%m-%d") if article.get("datetime") else None,
+                "headline": article.get("headline", ""),
+                "summary": article.get("summary", ""),
+                "source": article.get("source", ""),
+                "symbol": symbol.upper(),
+                "related": article.get("related", ""),
+            })
+
+        return normalized
 
     def fetch_news_batch(self, symbols: List[str], last: int = 50) -> Dict[str, List[Dict]]:
         """

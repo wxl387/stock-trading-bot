@@ -148,11 +148,19 @@ class LLMClient:
                 return None
 
             except Exception as e:
+                # Fail fast on permanent errors (auth, invalid request)
+                err_name = type(e).__name__
+                if err_name in ("AuthenticationError", "PermissionDeniedError"):
+                    logger.error(f"LLM auth failure (not retrying): {e}")
+                    break
                 logger.warning(
                     f"LLM request failed (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}"
                 )
                 if attempt < self.MAX_RETRIES - 1:
-                    time.sleep(self.RETRY_DELAY * (attempt + 1))
+                    delay = self.RETRY_DELAY * (attempt + 1)
+                    if err_name == "RateLimitError":
+                        delay = max(delay, 10)  # Wait longer on rate limit
+                    time.sleep(delay)
 
         logger.error("LLM request failed after all retries")
         return None

@@ -3,6 +3,8 @@ Simulated broker for offline paper trading without real broker credentials.
 """
 import json
 import logging
+import os
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -395,8 +397,16 @@ class SimulatedBroker(BaseBroker):
                 "saved_at": datetime.now().isoformat()
             }
 
-            with open(self.STATE_FILE, "w") as f:
-                json.dump(state, f, indent=2)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(DATA_DIR), suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(state, f, indent=2)
+                os.replace(tmp_path, self.STATE_FILE)
+            except BaseException:
+                os.unlink(tmp_path)
+                raise
 
         except Exception as e:
             logger.error(f"Error saving state: {e}")

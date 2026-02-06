@@ -290,13 +290,13 @@ class LSTMModel:
         with open(model_dir / "metadata.json", "r") as f:
             metadata = json.load(f)
 
-        self.sequence_length = metadata["sequence_length"]
-        self.n_features = metadata["n_features"]
-        self.lstm_units = tuple(metadata["lstm_units"])
-        self.dropout_rate = metadata["dropout_rate"]
-        self.learning_rate = metadata["learning_rate"]
+        self.sequence_length = metadata.get("sequence_length", self.sequence_length)
+        self.n_features = metadata.get("n_features", self.n_features)
+        self.lstm_units = tuple(metadata.get("lstm_units", self.lstm_units))
+        self.dropout_rate = metadata.get("dropout_rate", self.dropout_rate)
+        self.learning_rate = metadata.get("learning_rate", self.learning_rate)
 
-        if metadata["normalization_stats"]:
+        if metadata.get("normalization_stats"):
             self.normalization_stats = {
                 "mean": np.array(metadata["normalization_stats"]["mean"]),
                 "std": np.array(metadata["normalization_stats"]["std"])
