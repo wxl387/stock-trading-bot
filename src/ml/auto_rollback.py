@@ -5,7 +5,9 @@ rolls back to the previous version if degradation is detected.
 """
 import json
 import logging
+import os
 import shutil
+import tempfile
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -284,9 +286,21 @@ class AutoRollbackManager:
         return {}
 
     def _save_registry(self, registry: Dict) -> None:
-        """Save version registry."""
-        with open(self.registry_path, "w") as f:
-            json.dump(registry, f, indent=2)
+        """Save version registry atomically using tempfile + os.replace."""
+        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=self.registry_path.parent, suffix=".json.tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(registry, f, indent=2)
+            os.replace(tmp_path, self.registry_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
 
 def get_auto_rollback_manager(config: Optional[Dict] = None) -> AutoRollbackManager:

@@ -209,11 +209,14 @@ class RegimeDetector:
 
         # Smoothed values
         atr = tr.rolling(window=period).mean()
+        atr = atr.replace(0, np.nan)  # Guard against division by zero in early window
         plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
         minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
 
         # DX and ADX
-        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        di_sum = plus_di + minus_di
+        di_sum = di_sum.replace(0, np.nan)  # Guard against zero denominator
+        dx = 100 * abs(plus_di - minus_di) / di_sum
         adx = dx.rolling(window=period).mean()
 
         return adx.iloc[-1] if not np.isnan(adx.iloc[-1]) else 0.0
@@ -315,10 +318,13 @@ class RegimeDetector:
         minus_dm = minus_dm.clip(lower=0)
 
         atr = tr.rolling(window=period).mean()
+        atr = atr.replace(0, np.nan)  # Guard against division by zero in early window
         plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
         minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
 
-        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        di_sum = plus_di + minus_di
+        di_sum = di_sum.replace(0, np.nan)  # Guard against zero denominator
+        dx = 100 * abs(plus_di - minus_di) / di_sum
         adx_series = dx.rolling(window=period).mean()
 
         return adx_series.fillna(0)

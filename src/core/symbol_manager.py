@@ -7,6 +7,8 @@ Tracks symbol performance, enforces constraints, and handles cooldown periods.
 
 import json
 import logging
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -158,6 +160,7 @@ class SymbolManager:
         # Active symbols tracking
         self._symbols: Dict[str, SymbolEntry] = {}
         self._history: List[SymbolEntry] = []  # Removed symbols
+        self._state_lock = threading.Lock()
 
         # Load existing state
         self._load_state()
@@ -225,8 +228,9 @@ class SymbolManager:
             current_price=entry_price,
         )
 
-        self._symbols[symbol] = entry
-        self._save_state()
+        with self._state_lock:
+            self._symbols[symbol] = entry
+            self._save_state()
 
         logger.info(f"Added symbol {symbol} (score={score:.1f}, reason={reason})")
         return True
@@ -259,19 +263,20 @@ class SymbolManager:
             return False
 
         # Update entry
-        entry = self._symbols[symbol]
-        entry.is_active = False
-        entry.removal_date = datetime.now()
-        entry.removal_reason = reason
-        entry.days_held = (datetime.now() - entry.added_date).days
+        with self._state_lock:
+            entry = self._symbols[symbol]
+            entry.is_active = False
+            entry.removal_date = datetime.now()
+            entry.removal_reason = reason
+            entry.days_held = (datetime.now() - entry.added_date).days
 
-        if apply_cooldown:
-            entry.cooldown_until = datetime.now() + timedelta(days=self.cooldown_days)
+            if apply_cooldown:
+                entry.cooldown_until = datetime.now() + timedelta(days=self.cooldown_days)
 
-        # Move to history
-        self._history.append(entry)
+            # Move to history
+            self._history.append(entry)
 
-        self._save_state()
+            self._save_state()
 
         logger.info(f"Removed symbol {symbol} (reason={reason}, held {entry.days_held} days)")
         return True
@@ -291,15 +296,16 @@ class SymbolManager:
         Args:
             prices: Dictionary mapping symbol to current price
         """
-        for symbol, price in prices.items():
-            if symbol in self._symbols:
-                entry = self._symbols[symbol]
-                entry.current_price = price
-                if entry.entry_price > 0:
-                    entry.total_return = (price - entry.entry_price) / entry.entry_price
-                entry.days_held = (datetime.now() - entry.added_date).days
+        with self._state_lock:
+            for symbol, price in prices.items():
+                if symbol in self._symbols:
+                    entry = self._symbols[symbol]
+                    entry.current_price = price
+                    if entry.entry_price > 0:
+                        entry.total_return = (price - entry.entry_price) / entry.entry_price
+                    entry.days_held = (datetime.now() - entry.added_date).days
 
-        self._save_state()
+            self._save_state()
 
     def review_symbols(
         self,
@@ -437,7 +443,7 @@ class SymbolManager:
         return new_exposure <= self.max_sector_exposure
 
     def _save_state(self) -> None:
-        """Save state to file."""
+        """Save state to file atomically using tempfile + os.replace."""
         try:
             state = {
                 "symbols": {s: e.to_dict() for s, e in self._symbols.items()},
@@ -445,8 +451,19 @@ class SymbolManager:
                 "timestamp": datetime.now().isoformat(),
             }
 
-            with open(self.state_file, 'w') as f:
-                json.dump(state, f, indent=2)
+            state_dir = self.state_file.parent
+            state_dir.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=state_dir, suffix=".json.tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(state, f, indent=2)
+                os.replace(tmp_path, self.state_file)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
         except Exception as e:
             logger.error(f"Error saving state: {e}")
@@ -493,23 +510,25 @@ class SymbolManager:
         added = 0
         sectors = sectors or {}
 
-        for symbol in symbols:
-            # Skip if already exists
-            if symbol in self._symbols:
-                continue
+        with self._state_lock:
+            for symbol in symbols:
+                # Skip if already exists
+                if symbol in self._symbols:
+                    continue
 
-            entry = SymbolEntry(
-                symbol=symbol,
-                added_date=datetime.now(),
-                add_reason=reason,
-                add_score=100.0,  # Initial symbols get max score
-                sector=sectors.get(symbol, ""),
-            )
+                entry = SymbolEntry(
+                    symbol=symbol,
+                    added_date=datetime.now(),
+                    add_reason=reason,
+                    add_score=100.0,  # Initial symbols get max score
+                    sector=sectors.get(symbol, ""),
+                )
 
-            self._symbols[symbol] = entry
-            added += 1
+                self._symbols[symbol] = entry
+                added += 1
 
-        self._save_state()
+            self._save_state()
+
         logger.info(f"Initialized with {added} symbols")
         return added
 

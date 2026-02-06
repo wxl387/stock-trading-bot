@@ -4,6 +4,8 @@ Runs alongside the trading bot to automatically retrain models on a schedule.
 Supports degradation detection, walk-forward validation, and auto-rollback (Phase 18).
 """
 import logging
+import os
+import tempfile
 import threading
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -418,7 +420,7 @@ class ScheduledRetrainer:
         self._rollback_manager.check_all_grace_periods()
 
     def _log_result(self, result: Dict) -> None:
-        """Append result to retraining log file."""
+        """Append result to retraining log file atomically."""
         import json
 
         try:
@@ -435,9 +437,20 @@ class ScheduledRetrainer:
             # Keep last 100 entries
             log["history"] = log["history"][-100:]
 
-            # Save
-            with open(self.log_file, "w") as f:
-                json.dump(log, f, indent=2)
+            # Save atomically using tempfile + os.replace
+            log_dir = self.log_file.parent
+            log_dir.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=log_dir, suffix=".json.tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(log, f, indent=2)
+                os.replace(tmp_path, self.log_file)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
         except Exception as e:
             logger.error(f"Failed to log retraining result: {e}")
