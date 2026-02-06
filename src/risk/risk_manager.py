@@ -151,6 +151,12 @@ class RiskManager:
         self.starting_equity = current_equity
         self.daily_trades = 0
         self.trading_halted = False
+
+        # Seed peak_portfolio_value on first call so drawdown tracking is correct
+        if self.peak_portfolio_value == 0.0 and current_equity > 0:
+            self.peak_portfolio_value = current_equity
+            logger.info(f"Peak portfolio value initialized to ${current_equity:,.2f}")
+
         logger.info(f"Daily limits reset. Starting equity: ${current_equity:,.2f}")
 
     def check_can_trade(self) -> RiskCheckResult:
@@ -323,7 +329,17 @@ class RiskManager:
         except Exception as e:
             logger.warning(f"Failed to fetch VIX: {e}")
 
-        return self._cached_vix  # Return cached value as fallback
+        # Return cached value only if not too stale (max 4 hours)
+        if self._cached_vix is not None and self._vix_cache_time is not None:
+            staleness = datetime.now() - self._vix_cache_time
+            if staleness < timedelta(hours=4):
+                logger.info(f"Using stale VIX cache ({staleness.total_seconds()/3600:.1f}h old): {self._cached_vix:.2f}")
+                return self._cached_vix
+            else:
+                logger.warning(f"VIX cache too stale ({staleness.total_seconds()/3600:.1f}h old), discarding")
+                return None
+
+        return None
 
     def calculate_volatility_multiplier(self, vix: Optional[float] = None) -> float:
         """
@@ -505,18 +521,28 @@ class RiskManager:
             Stop loss price.
         """
         if stop_type == StopLossType.FIXED:
-            return entry_price * (1 - fixed_pct)
+            stop_price = entry_price * (1 - fixed_pct)
 
         elif stop_type == StopLossType.ATR:
-            if atr is None:
-                logger.warning("ATR not provided, using fixed stop loss")
-                return entry_price * (1 - fixed_pct)
-            return entry_price - (atr * atr_multiplier)
+            if atr is None or atr <= 0:
+                logger.warning("ATR not provided or invalid, using fixed stop loss")
+                stop_price = entry_price * (1 - fixed_pct)
+            else:
+                stop_price = entry_price - (atr * atr_multiplier)
 
         elif stop_type == StopLossType.TRAILING:
-            return entry_price * (1 - fixed_pct)
+            stop_price = entry_price * (1 - fixed_pct)
 
-        return entry_price * (1 - fixed_pct)
+        else:
+            stop_price = entry_price * (1 - fixed_pct)
+
+        # Validate stop is below entry price (for long positions)
+        if stop_price >= entry_price:
+            fallback = entry_price * 0.95  # 5% default
+            logger.warning(f"Invalid stop ${stop_price:.2f} >= entry ${entry_price:.2f}, clamping to ${fallback:.2f}")
+            stop_price = fallback
+
+        return stop_price
 
     def set_stop_loss(
         self,

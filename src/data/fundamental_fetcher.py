@@ -100,6 +100,9 @@ class FundamentalData:
     last_earnings_date: Optional[datetime] = None
     earnings_surprise_pct: Optional[float] = None
 
+    # Data quality flag
+    fetch_failed: bool = False
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         result = {}
@@ -111,26 +114,32 @@ class FundamentalData:
         return result
 
     def to_features(self) -> Dict[str, float]:
-        """Convert to feature dictionary for ML models."""
+        """Convert to feature dictionary for ML models.
+
+        If fetch_failed is True, returns NaN values so downstream code
+        (e.g., pandas dropna) can properly handle missing data rather than
+        treating API failures as zero-valued fundamentals.
+        """
+        fallback = float('nan') if self.fetch_failed else 0.0
         features = {
-            "pe_ratio": self.pe_ratio or 0.0,
-            "forward_pe": self.forward_pe or 0.0,
-            "peg_ratio": self.peg_ratio or 0.0,
-            "price_to_book": self.price_to_book or 0.0,
-            "price_to_sales": self.price_to_sales or 0.0,
-            "profit_margin": self.profit_margin or 0.0,
-            "operating_margin": self.operating_margin or 0.0,
-            "gross_margin": self.gross_margin or 0.0,
-            "roe": self.roe or 0.0,
-            "roa": self.roa or 0.0,
-            "revenue_growth_yoy": self.revenue_growth_yoy or 0.0,
-            "earnings_growth_yoy": self.earnings_growth_yoy or 0.0,
-            "debt_to_equity": self.debt_to_equity or 0.0,
-            "current_ratio": self.current_ratio or 0.0,
-            "quick_ratio": self.quick_ratio or 0.0,
-            "dividend_yield": self.dividend_yield or 0.0,
-            "days_to_earnings": float(self.days_to_earnings) if self.days_to_earnings else 0.0,
-            "target_upside": self.target_upside or 0.0,
+            "pe_ratio": self.pe_ratio if self.pe_ratio is not None else fallback,
+            "forward_pe": self.forward_pe if self.forward_pe is not None else fallback,
+            "peg_ratio": self.peg_ratio if self.peg_ratio is not None else fallback,
+            "price_to_book": self.price_to_book if self.price_to_book is not None else fallback,
+            "price_to_sales": self.price_to_sales if self.price_to_sales is not None else fallback,
+            "profit_margin": self.profit_margin if self.profit_margin is not None else fallback,
+            "operating_margin": self.operating_margin if self.operating_margin is not None else fallback,
+            "gross_margin": self.gross_margin if self.gross_margin is not None else fallback,
+            "roe": self.roe if self.roe is not None else fallback,
+            "roa": self.roa if self.roa is not None else fallback,
+            "revenue_growth_yoy": self.revenue_growth_yoy if self.revenue_growth_yoy is not None else fallback,
+            "earnings_growth_yoy": self.earnings_growth_yoy if self.earnings_growth_yoy is not None else fallback,
+            "debt_to_equity": self.debt_to_equity if self.debt_to_equity is not None else fallback,
+            "current_ratio": self.current_ratio if self.current_ratio is not None else fallback,
+            "quick_ratio": self.quick_ratio if self.quick_ratio is not None else fallback,
+            "dividend_yield": self.dividend_yield if self.dividend_yield is not None else fallback,
+            "days_to_earnings": float(self.days_to_earnings) if self.days_to_earnings is not None else fallback,
+            "target_upside": self.target_upside if self.target_upside is not None else fallback,
         }
         return features
 
@@ -276,8 +285,8 @@ class FundamentalFetcher:
 
         except Exception as e:
             logger.error(f"Error fetching fundamentals for {symbol}: {e}")
-            # Return empty data object
-            return FundamentalData(symbol=symbol)
+            # Return empty data object marked as failed so to_features() returns NaN
+            return FundamentalData(symbol=symbol, fetch_failed=True)
 
     def fetch_multiple(
         self,
@@ -300,7 +309,7 @@ class FundamentalFetcher:
                 results[symbol] = self.fetch_fundamentals(symbol, use_cache)
             except Exception as e:
                 logger.error(f"Failed to fetch fundamentals for {symbol}: {e}")
-                results[symbol] = FundamentalData(symbol=symbol)
+                results[symbol] = FundamentalData(symbol=symbol, fetch_failed=True)
         return results
 
     def get_market_percentiles(
