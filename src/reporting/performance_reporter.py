@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
+import numpy as np
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
@@ -202,23 +203,35 @@ class PerformanceReporter:
         if sells.empty or 'pnl' not in sells.columns:
             return 0.0
 
-        # Calculate returns
-        returns = sells['pnl'].values
+        # Calculate percentage returns (normalize P&L by initial capital)
+        returns = sells['pnl'].values / self.initial_capital if self.initial_capital > 0 else sells['pnl'].values
 
         if len(returns) < 2:
             return 0.0
 
-        # Annualize
         mean_return = returns.mean()
         std_return = returns.std()
 
         if std_return == 0:
             return 0.0
 
-        # Simple Sharpe approximation
-        sharpe = (mean_return - (risk_free_rate / 252)) / std_return
+        # Annualized Sharpe: (mean_return - daily_rf) / std * sqrt(trades_per_year)
+        daily_rf = risk_free_rate / 252
+        trades_per_year = min(252, len(returns) * 252 / max(1, self._trading_days(trades)))
+        sharpe = (mean_return - daily_rf) / std_return * np.sqrt(trades_per_year)
 
         return sharpe
+
+    def _trading_days(self, trades: List[Dict]) -> int:
+        """Estimate number of trading days spanned by trades."""
+        try:
+            timestamps = [pd.to_datetime(t['timestamp']) for t in trades if 'timestamp' in t]
+            if len(timestamps) >= 2:
+                span = (max(timestamps) - min(timestamps)).days
+                return max(1, int(span * 252 / 365))
+        except Exception:
+            pass
+        return max(1, len(trades))
 
     def calculate_max_drawdown(self, trades: List[Dict]) -> Tuple[float, float]:
         """
@@ -247,7 +260,7 @@ class PerformanceReporter:
         # Calculate drawdown
         equity_series = pd.Series(equity_curve)
         cummax = equity_series.cummax()
-        drawdown = (equity_series - cummax) / cummax * 100
+        drawdown = (equity_series - cummax) / cummax.replace(0, np.nan) * 100
 
         max_dd_pct = abs(drawdown.min())
         max_dd_amount = abs((equity_series - cummax).min())

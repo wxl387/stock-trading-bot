@@ -7,7 +7,7 @@ rebalancing recommendations, and performance attribution.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -725,7 +725,7 @@ class PortfolioStrategistAgent(BaseAgent):
         current: Dict[str, float],
         target: Dict[str, float],
         drift: Dict[str, float]
-    ) -> tuple[bool, List[Dict[str, Any]]]:
+    ) -> Tuple[bool, List[Dict[str, Any]]]:
         """Check if rebalancing is needed and generate trades."""
         # Get threshold from config
         from config.settings import Settings

@@ -683,6 +683,8 @@ class PortfolioOptimizer:
             Constrained weights
         """
         n = len(weights)
+        if n == 0:
+            return {}
 
         # Check if constraints are feasible
         # If max_weight * n < 1, we can't satisfy both constraints
