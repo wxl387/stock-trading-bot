@@ -749,6 +749,11 @@ class PortfolioOptimizer:
                     normalized[k] = 1.0 / n
                 break
 
+        # Final normalization to ensure weights sum to exactly 1.0
+        total_final = sum(normalized.values())
+        if total_final > 0 and abs(total_final - 1.0) > 1e-6:
+            normalized = {k: v / total_final for k, v in normalized.items()}
+
         return normalized
 
     def _check_correlation_constraints(

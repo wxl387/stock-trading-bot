@@ -542,6 +542,11 @@ class RiskManager:
             logger.warning(f"Invalid stop ${stop_price:.2f} >= entry ${entry_price:.2f}, clamping to ${fallback:.2f}")
             stop_price = fallback
 
+        # Prevent negative stop prices (can happen with large ATR * multiplier)
+        if stop_price <= 0:
+            stop_price = entry_price * 0.95
+            logger.warning(f"Negative stop price, clamping to ${stop_price:.2f}")
+
         return stop_price
 
     def set_stop_loss(
@@ -762,7 +767,7 @@ class RiskManager:
                     if sell_qty > 0:
                         level.triggered = True
                         tp.quantity_remaining -= sell_qty
-                        triggered_sales.append((symbol, sell_qty, level.target_price))
+                        triggered_sales.append((symbol, sell_qty, current_price))
 
                         logger.info(f"Take-profit hit for {symbol}: {level.target_pct:.0%} target, "
                                    f"selling {sell_qty} shares at ${current_price:.2f}")

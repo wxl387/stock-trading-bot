@@ -1146,7 +1146,7 @@ portfolio_optimization:
             with col4:
                 # Calculate diversification ratio for current positions
                 if not positions.empty:
-                    current_weights = dict(zip(positions['symbol'], positions['weight']))
+                    current_weights = dict(zip(positions['Symbol'], positions['weight']))
                     div_ratio = correlation_analyzer.calculate_diversification_ratio(
                         current_weights, returns_df
                     )
@@ -1175,7 +1175,7 @@ portfolio_optimization:
                     # Calculate current portfolio metrics if positions exist
                     current_portfolio = None
                     if not positions.empty:
-                        current_weights_dict = dict(zip(positions['symbol'], positions['weight']))
+                        current_weights_dict = dict(zip(positions['Symbol'], positions['weight']))
                         # Calculate current portfolio stats
                         mean_returns = returns_df.mean() * 252
                         cov_matrix = returns_df.cov() * 252
@@ -1299,7 +1299,7 @@ portfolio_optimization:
 
                 # Check concentration risk
                 if not positions.empty:
-                    current_weights = dict(zip(positions['symbol'], positions['weight']))
+                    current_weights = dict(zip(positions['Symbol'], positions['weight']))
                     concentration_check = correlation_analyzer.check_concentration_risk(
                         current_weights, corr_matrix
                     )
@@ -1351,7 +1351,7 @@ portfolio_optimization:
                 )
 
                 # Get current and target weights (example: use portfolio optimization weights if available)
-                current_weights_dict = dict(zip(positions['symbol'], positions['weight']))
+                current_weights_dict = dict(zip(positions['Symbol'], positions['weight']))
 
                 # For demonstration, calculate costs for current allocation
                 # In real scenario, this would use target weights from optimizer

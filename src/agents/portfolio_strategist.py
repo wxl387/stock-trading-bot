@@ -737,7 +737,8 @@ class PortfolioStrategistAgent(BaseAgent):
 
         trades = []
         if needs_rebalancing:
-            portfolio_value = sum(self._get_current_weights().values()) or 100000  # Estimate
+            holdings = self._get_holdings_with_performance()
+            portfolio_value = sum(h.get("market_value", 0) for h in holdings) or 100000
 
             for symbol, d in drift.items():
                 if abs(d) > 0.01:  # Minimum 1% to trade
