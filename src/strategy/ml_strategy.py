@@ -282,7 +282,7 @@ class MLStrategy:
             price = self.data_fetcher.get_latest_price(symbol)
 
             if use_portfolio_weights and symbol in target_weights:
-                # Portfolio optimization mode: use target weights
+                # Portfolio optimization mode: use target weights, but respect ML signals
                 if not (price > 0 and np.isfinite(price)):
                     logger.warning(f"Skipping {symbol}: invalid price {price}")
                     continue
@@ -291,7 +291,19 @@ class MLStrategy:
                 target_shares = int(target_value / price)
                 shares_diff = target_shares - current_shares
 
-                # Only trade if difference is significant (>5% of target or >$100)
+                # ML SELL signal overrides optimizer: sell entire position
+                if signal.signal == SignalType.SELL and current_shares > 0:
+                    recommendations.append({
+                        "action": "SELL",
+                        "symbol": symbol,
+                        "shares": current_shares,
+                        "price": price,
+                        "confidence": signal.confidence,
+                        "reason": f"ML sell signal overrides target {target_weight:.1%} (confidence: {signal.confidence:.1%})"
+                    })
+                    continue
+
+                # Only rebalance if difference is significant (>5% of target or >$100)
                 min_trade_shares = max(1, int(target_shares * 0.05))
                 min_trade_value = 100 / price if price > 0 else 1
 

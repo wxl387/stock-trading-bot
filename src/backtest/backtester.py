@@ -461,10 +461,10 @@ class Backtester:
         df = self.feature_engineer.add_all_features_extended(
             df,
             symbol=symbol,
-            include_sentiment=True,
-            include_macro=True,
+            include_sentiment=False,
+            include_macro=False,
             include_cross_asset=True,
-            include_interactions=True,
+            include_interactions=False,
             include_lagged=True,
             use_cache=True
         )
@@ -478,7 +478,7 @@ class Backtester:
         prices = df["close"]
 
         # Check if model is ensemble (needs sequences) or XGBoost (flat features)
-        is_ensemble = hasattr(model, 'loaded_models') and len(getattr(model, 'loaded_models', {})) > 1
+        is_ensemble = hasattr(model, 'active_models') and len(getattr(model, 'active_models', [])) > 1
 
         # Generate predictions
         if is_ensemble:
@@ -537,10 +537,10 @@ class Backtester:
                 df = self.feature_engineer.add_all_features_extended(
                     df,
                     symbol=symbol,
-                    include_sentiment=True,
-                    include_macro=True,
+                    include_sentiment=False,
+                    include_macro=False,
                     include_cross_asset=True,
-                    include_interactions=True,
+                    include_interactions=False,
                     include_lagged=True,
                     use_cache=True
                 )
