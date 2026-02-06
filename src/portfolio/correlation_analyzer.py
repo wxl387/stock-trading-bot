@@ -82,6 +82,9 @@ class CorrelationAnalyzer:
 
                 # Convert covariance to correlation
                 std_devs = np.sqrt(np.diag(cov_matrix))
+                if (std_devs == 0).any():
+                    logger.warning("Some assets have zero variance. Using epsilon for correlation.")
+                    std_devs = np.where(std_devs == 0, 1e-8, std_devs)
                 corr_matrix = cov_matrix / np.outer(std_devs, std_devs)
 
                 # Create DataFrame

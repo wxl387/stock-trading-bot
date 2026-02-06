@@ -721,7 +721,7 @@ class TradingEngine:
             )
 
         # Remove stop-loss if fully exited
-        if position.quantity - sell_qty <= 0:
+        if sell_qty >= position.quantity:
             self.risk_manager.remove_stop_loss(symbol)
 
     def _get_target_portfolio_weights(self, signals: Optional[Dict] = None) -> Optional[Dict[str, float]]:

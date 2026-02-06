@@ -253,7 +253,13 @@ class SimulatedBroker(BaseBroker):
 
     def get_quotes(self, symbols: List[str]) -> Dict[str, Quote]:
         """Get quotes for multiple symbols."""
-        return {symbol: self.get_quote(symbol) for symbol in symbols}
+        quotes = {}
+        for symbol in symbols:
+            try:
+                quotes[symbol] = self.get_quote(symbol)
+            except Exception as e:
+                logger.warning(f"Failed to get quote for {symbol}: {e}")
+        return quotes
 
     def get_portfolio_summary(self) -> Dict[str, Any]:
         """Get a summary of portfolio performance."""
@@ -344,11 +350,11 @@ class SimulatedBroker(BaseBroker):
             # Add cash
             self.cash += proceeds
 
+            pos["last_price"] = price
+
             # Remove position entry if fully closed
             if pos["quantity"] == 0:
                 del self.positions[symbol]
-
-        pos["last_price"] = price
 
     def _get_positions_value(self) -> float:
         """Get total value of all positions."""

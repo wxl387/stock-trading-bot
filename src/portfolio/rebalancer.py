@@ -445,7 +445,11 @@ class PortfolioRebalancer:
             if days_since < 28:  # At least 28 days between rebalances
                 return False
 
-            return now.day == self.day_of_month
+            # Handle months with fewer days than target day_of_month
+            import calendar
+            last_day = calendar.monthrange(now.year, now.month)[1]
+            target_day = min(self.day_of_month, last_day)
+            return now.day == target_day
 
         elif self.calendar_frequency == "quarterly":
             # Rebalance every 3 months

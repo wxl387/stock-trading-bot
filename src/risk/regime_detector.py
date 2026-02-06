@@ -153,6 +153,12 @@ class RegimeDetector:
         # Calculate indicators
         sma_50 = market_data['close'].rolling(window=50).mean().iloc[-1]
         sma_200 = market_data['close'].rolling(window=200).mean().iloc[-1]
+
+        # Guard against NaN from insufficient data
+        if pd.isna(sma_50) or pd.isna(sma_200):
+            logger.warning(f"Insufficient data for SMA (SMA50={sma_50}, SMA200={sma_200}). Using cached or default.")
+            return self._cached_regime or MarketRegime.BULL
+
         adx = self._calculate_adx(market_data)
 
         # Determine regime

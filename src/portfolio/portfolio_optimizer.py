@@ -393,8 +393,11 @@ class PortfolioOptimizer:
 
         # Initial guess: inverse volatility
         vols = returns.std()
-        init_weights = (1.0 / vols) / (1.0 / vols).sum()
-        init_weights = init_weights.values
+        if (vols == 0).any():
+            init_weights = np.array([1.0 / n_assets] * n_assets)
+        else:
+            init_weights = (1.0 / vols) / (1.0 / vols).sum()
+            init_weights = init_weights.values
 
         # Optimize
         result = minimize(

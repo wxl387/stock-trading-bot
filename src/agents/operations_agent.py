@@ -256,13 +256,16 @@ class OperationsAgent(BaseAgent):
                         except Exception as notify_err:
                             logger.warning(f"Notification failed for message {message.id}: {notify_err}")
 
-                    # Mark as processed
-                    self.message_queue.mark_processed(message.id)
-
                 except Exception as e:
                     error_msg = f"Error processing message {message.id}: {e}"
                     logger.error(error_msg)
                     result["errors"].append(error_msg)
+                finally:
+                    # Always mark as processed to prevent infinite retry loop
+                    try:
+                        self.message_queue.mark_processed(message.id)
+                    except Exception as mark_err:
+                        logger.error(f"Failed to mark message {message.id} as processed: {mark_err}")
 
         except Exception as e:
             error_msg = f"Error in run_cycle: {e}"
