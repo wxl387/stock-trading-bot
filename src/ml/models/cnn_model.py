@@ -65,6 +65,7 @@ class CNNModel:
 
         self.model: Optional[Sequential] = None
         self.normalization_stats: Optional[Dict] = None
+        self.feature_names: list = []
         self.is_trained = False
         self.history = None
 
@@ -270,6 +271,7 @@ class CNNModel:
             "kernel_size": self.kernel_size,
             "dropout_rate": self.dropout_rate,
             "learning_rate": self.learning_rate,
+            "feature_names": self.feature_names,
             "normalization_stats": {
                 "mean": self.normalization_stats["mean"].tolist(),
                 "std": self.normalization_stats["std"].tolist()
@@ -312,6 +314,7 @@ class CNNModel:
         self.kernel_size = metadata["kernel_size"]
         self.dropout_rate = metadata["dropout_rate"]
         self.learning_rate = metadata["learning_rate"]
+        self.feature_names = metadata.get("feature_names", [])
 
         if metadata["normalization_stats"]:
             self.normalization_stats = {

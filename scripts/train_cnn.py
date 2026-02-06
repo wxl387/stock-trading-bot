@@ -47,8 +47,17 @@ def prepare_data(
             logger.warning(f"No data for {symbol}")
             continue
 
-        # Add features
-        df = feature_engineer.add_all_features(df)
+        # Add features (must match prediction path in ml_strategy.py)
+        df = feature_engineer.add_all_features_extended(
+            df,
+            symbol=symbol,
+            include_sentiment=False,
+            include_macro=False,
+            include_cross_asset=True,
+            include_interactions=False,
+            include_lagged=True,
+            use_cache=True
+        )
 
         # Create labels (future returns)
         df["future_returns"] = df["close"].shift(-prediction_horizon) / df["close"] - 1
@@ -176,7 +185,8 @@ def main():
     print(f"Test F1 Score:      {f1_score(y_test, y_pred):.4f}")
     print("=" * 60)
 
-    # Save model
+    # Store feature names and save model
+    model.feature_names = feature_cols
     model.save("cnn_trading_model")
     logger.info("Model saved as 'cnn_trading_model'")
 

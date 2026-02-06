@@ -10,6 +10,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import argparse
 import logging
+
+# Import TF BEFORE any pandas-importing module to avoid model.predict() deadlock
+# (pandas 2.3+ / TF 2.20+ import order bug on macOS)
+from src.ml.device_config import configure_tensorflow_device
+configure_tensorflow_device()
+
 from config.settings import setup_logging, Settings
 from src.core.trading_engine import TradingEngine, run_bot
 

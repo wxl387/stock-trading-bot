@@ -103,11 +103,12 @@ class XGBoostModel:
         if eval_set is not None:
             eval_sets.append(eval_set)
 
-        # Train with early stopping
+        # Train with early stopping (set via constructor for XGBoost 2.x+)
+        if eval_set is not None:
+            self.model.set_params(early_stopping_rounds=early_stopping_rounds)
         self.model.fit(
             X, y,
             eval_set=eval_sets,
-            early_stopping_rounds=early_stopping_rounds if eval_set is not None else None,
             verbose=False
         )
 

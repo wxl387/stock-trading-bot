@@ -486,11 +486,10 @@ class TradingEngine:
                                     # Send notification
                                     if self.notifier:
                                         self.notifier.notify_trade(
-                                            symbol=t_symbol,
                                             action=t_action,
-                                            quantity=abs(t_shares),
-                                            price=t_price,
-                                            reason="Portfolio Rebalancing"
+                                            symbol=t_symbol,
+                                            shares=abs(t_shares),
+                                            price=t_price
                                         )
 
                             except Exception as e:
@@ -753,7 +752,7 @@ class TradingEngine:
 
                     # Run regime-aware optimization
                     weights = self.portfolio_optimizer.optimize_regime_aware(
-                        symbols=self.symbols,
+                        symbols=self.get_active_symbols(),
                         market_regime=current_regime,
                         signals=signals if portfolio_config.get("incorporate_signals", True) else None
                     )
@@ -785,7 +784,7 @@ class TradingEngine:
 
             # Run optimization
             weights = self.portfolio_optimizer.optimize(
-                symbols=self.symbols,
+                symbols=self.get_active_symbols(),
                 method=method,
                 signals=signals if portfolio_config.get("incorporate_signals", True) else None
             )

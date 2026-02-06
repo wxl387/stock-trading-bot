@@ -5,8 +5,14 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List, Dict, Tuple, Union
-import pandas as pd
 import numpy as np
+
+# Import TF BEFORE pandas to avoid model.predict() deadlock
+# (pandas 2.3+ / TF 2.20+ import order bug on macOS)
+from src.ml.device_config import configure_tensorflow_device
+configure_tensorflow_device()
+
+import pandas as pd
 
 from src.data.data_fetcher import DataFetcher
 from src.data.feature_engineer import FeatureEngineer

@@ -60,6 +60,7 @@ class LSTMModel:
 
         self.model: Optional[Sequential] = None
         self.normalization_stats: Optional[Dict] = None
+        self.feature_names: List[str] = []
         self.is_trained = False
         self.history = None
 
@@ -253,6 +254,7 @@ class LSTMModel:
             "lstm_units": list(self.lstm_units),
             "dropout_rate": self.dropout_rate,
             "learning_rate": self.learning_rate,
+            "feature_names": self.feature_names,
             "normalization_stats": {
                 "mean": self.normalization_stats["mean"].tolist(),
                 "std": self.normalization_stats["std"].tolist()
@@ -294,6 +296,7 @@ class LSTMModel:
         self.lstm_units = tuple(metadata.get("lstm_units", self.lstm_units))
         self.dropout_rate = metadata.get("dropout_rate", self.dropout_rate)
         self.learning_rate = metadata.get("learning_rate", self.learning_rate)
+        self.feature_names = metadata.get("feature_names", [])
 
         if metadata.get("normalization_stats"):
             self.normalization_stats = {
