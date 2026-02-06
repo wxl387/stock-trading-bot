@@ -257,7 +257,7 @@ class Backtester:
                 if trades:
                     trades[-1]["exit_date"] = prices.index[i]
                     trades[-1]["exit_price"] = price
-                    trades[-1]["pnl"] = proceeds - (position * entry_price)
+                    trades[-1]["pnl"] = proceeds - (position * entry_price * (1 + self.commission + self.slippage))
                     trades[-1]["return"] = (price - entry_price) / entry_price
 
                 position = 0
@@ -265,7 +265,14 @@ class Backtester:
 
         # Close any remaining position
         if position > 0:
-            capital += position * prices.iloc[-1] * (1 - self.commission - self.slippage)
+            last_price = prices.iloc[-1]
+            liquidation_proceeds = position * last_price * (1 - self.commission - self.slippage)
+            capital += liquidation_proceeds
+            if trades and "exit_date" not in trades[-1]:
+                trades[-1]["exit_date"] = prices.index[-1]
+                trades[-1]["exit_price"] = last_price
+                trades[-1]["pnl"] = liquidation_proceeds - (position * entry_price * (1 + self.commission + self.slippage))
+                trades[-1]["return"] = (last_price - entry_price) / entry_price
 
         # Calculate metrics
         trades_df = pd.DataFrame(trades)

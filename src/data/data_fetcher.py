@@ -166,15 +166,19 @@ class DataFetcher:
         Returns:
             Latest closing price.
         """
-        ticker = yf.Ticker(symbol)
-        info = ticker.fast_info
         try:
-            return info.last_price
-        except (AttributeError, KeyError):
+            ticker = yf.Ticker(symbol)
+            info = ticker.fast_info
             try:
-                return info.regular_market_previous_close
+                return info.last_price
             except (AttributeError, KeyError):
-                return 0.0
+                try:
+                    return info.regular_market_previous_close
+                except (AttributeError, KeyError):
+                    return 0.0
+        except Exception as e:
+            logger.error(f"Error fetching price for {symbol}: {e}")
+            return 0.0
 
     def get_latest_prices(self, symbols: List[str]) -> Dict[str, float]:
         """

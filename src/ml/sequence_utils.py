@@ -26,8 +26,8 @@ def create_sequences(
         X_seq: Array of shape (n_samples - sequence_length, sequence_length, n_features)
         y_seq: Array of shape (n_samples - sequence_length,)
     """
-    X_values = X.values
-    y_values = y.values
+    X_values = X.values if hasattr(X, 'values') else np.asarray(X)
+    y_values = y.values if hasattr(y, 'values') else np.asarray(y)
 
     n_samples = len(X_values) - sequence_length
     n_features = X_values.shape[1]

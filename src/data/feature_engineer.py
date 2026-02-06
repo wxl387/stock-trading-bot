@@ -60,9 +60,9 @@ class FeatureEngineer:
         df = df.copy()
 
         # Returns
-        df["returns_1d"] = df["close"].pct_change(1)
-        df["returns_5d"] = df["close"].pct_change(5)
-        df["returns_20d"] = df["close"].pct_change(20)
+        df["returns_1d"] = df["close"].pct_change(1, fill_method=None)
+        df["returns_5d"] = df["close"].pct_change(5, fill_method=None)
+        df["returns_20d"] = df["close"].pct_change(20, fill_method=None)
 
         # Log returns
         df["log_returns"] = np.log(df["close"] / df["close"].shift(1))
@@ -187,7 +187,7 @@ class FeatureEngineer:
         df["obv"] = self._calculate_obv(df)
 
         # Volume Price Trend
-        df["vpt"] = (df["close"].pct_change() * df["volume"]).cumsum()
+        df["vpt"] = (df["close"].pct_change(fill_method=None) * df["volume"]).cumsum()
 
         if HAS_TA:
             # VWAP (approximate daily)

@@ -184,7 +184,7 @@ class MetricsCalculator:
             return pd.DataFrame()
 
         # Calculate monthly returns
-        monthly = (1 + self.returns).resample('M').prod() - 1
+        monthly = (1 + self.returns).resample('ME').prod() - 1
 
         # Create pivot table
         monthly_df = pd.DataFrame({
