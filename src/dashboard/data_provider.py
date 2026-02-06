@@ -408,10 +408,11 @@ class DashboardDataProvider:
         # Keep last 365 days
         history = history[-365:]
 
-        # Save to file
+        # Save to file and update in-memory cache
         try:
             with open(PORTFOLIO_HISTORY_FILE, "w") as f:
                 json.dump({"history": history}, f, indent=2)
+            self._portfolio_history = history
             logger.info(f"Saved portfolio snapshot for {today}")
         except Exception as e:
             logger.error(f"Error saving portfolio history: {e}")

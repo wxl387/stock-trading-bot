@@ -82,12 +82,14 @@ class TelegramNotifier:
             return False
 
         try:
-            loop = asyncio.get_event_loop()
+            asyncio.get_running_loop()
+            # Already in an async context — can't use run_until_complete
+            logger.warning("Cannot send sync Telegram message from async context")
+            return False
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            pass
 
-        return loop.run_until_complete(self.send_async(message))
+        return asyncio.run(self.send_async(message))
 
     def notify_trade(
         self,
@@ -156,6 +158,40 @@ Exit Price: ${exit_price:.2f}
 Loss: ${loss_amount:,.2f} ({loss_pct:.1%})
 
 Position closed automatically.
+"""
+
+        return self.send(message)
+
+    def notify_take_profit(
+        self,
+        symbol: str,
+        exit_price: float,
+        quantity: int,
+        gain_amount: float,
+        gain_pct: float
+    ) -> bool:
+        """
+        Send take-profit notification.
+
+        Args:
+            symbol: Stock symbol.
+            exit_price: Exit price.
+            quantity: Shares sold.
+            gain_amount: Dollar gain.
+            gain_pct: Percentage gain.
+
+        Returns:
+            True if sent successfully.
+        """
+        message = f"""
+🎯 *TAKE-PROFIT TRIGGERED*
+
+Symbol: `{symbol}`
+Exit Price: ${exit_price:.2f}
+Quantity: {quantity} shares
+Gain: ${gain_amount:,.2f} ({gain_pct:.1%})
+
+_Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_
 """
 
         return self.send(message)

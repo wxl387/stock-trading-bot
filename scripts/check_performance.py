@@ -56,8 +56,13 @@ def analyze_trades(trades):
 
     df = pd.DataFrame(trades)
 
-    # Filter to closed positions (SELL trades)
-    sells = df[df['action'] == 'SELL'].copy()
+    # Broker stores action under 'side', not 'action'
+    side_col = 'side' if 'side' in df.columns else 'action'
+
+    # Compute P&L from buy/sell price pairs per symbol
+    # (broker trade records don't include a 'pnl' field)
+    buys = df[df[side_col] == 'BUY'].copy()
+    sells = df[df[side_col] == 'SELL'].copy()
 
     if sells.empty:
         return {
@@ -70,8 +75,30 @@ def analyze_trades(trades):
             'profit_factor': 0
         }
 
+    # Match sells to average buy price per symbol
+    avg_buy_prices = {}
+    for _, buy in buys.iterrows():
+        sym = buy['symbol']
+        if sym not in avg_buy_prices:
+            avg_buy_prices[sym] = []
+        avg_buy_prices[sym].append(buy['price'])
+
+    avg_buy = {sym: sum(prices) / len(prices) for sym, prices in avg_buy_prices.items()}
+
+    # Calculate P&L for each sell
+    pnl_list = []
+    for _, sell in sells.iterrows():
+        sym = sell['symbol']
+        qty = sell.get('quantity', sell.get('shares', 0))
+        entry = avg_buy.get(sym, sell['price'])
+        pnl = (sell['price'] - entry) * qty
+        pnl_list.append(pnl)
+
+    sells = sells.copy()
+    sells['pnl'] = pnl_list
+
     # Calculate metrics
-    realized_pnl = sells['pnl'].sum() if 'pnl' in sells.columns else 0
+    realized_pnl = sells['pnl'].sum()
     winning_trades = len(sells[sells['pnl'] > 0])
     losing_trades = len(sells[sells['pnl'] < 0])
     total_closed = winning_trades + losing_trades
