@@ -652,7 +652,7 @@ class WalkForwardOptimizer:
                         avg_win = np.mean([t["return"] for t in wins]) if wins else 0.0
                         avg_loss = abs(np.mean([t["return"] for t in losses])) if losses else 1.0
                         win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 1.0
-                        kelly_f = win_rate_k - (1 - win_rate_k) / win_loss_ratio
+                        kelly_f = win_rate_k - (1 - win_rate_k) / win_loss_ratio if win_loss_ratio > 0 else -1.0
                         half_kelly = max(0.05, min(0.25, kelly_f / 2.0))
                         position_value = equity * half_kelly * day_size_mult
                     else:

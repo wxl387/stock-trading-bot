@@ -289,7 +289,7 @@ class RiskManager:
             adjusted_shares = int(base_shares * multiplier)
             if adjusted_shares != base_shares:
                 logger.debug(f"VIX multiplier {multiplier:.2f} applied: {base_shares} -> {adjusted_shares} shares")
-            return max(1, adjusted_shares)  # At least 1 share
+            return max(1, adjusted_shares) if base_shares > 0 else 0
 
         return base_shares
 
