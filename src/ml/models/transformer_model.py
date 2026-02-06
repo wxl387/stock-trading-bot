@@ -5,7 +5,7 @@ Uses multi-head self-attention to capture long-range dependencies in time series
 import logging
 import json
 from pathlib import Path
-from typing import Optional, Dict, Tuple, Any
+from typing import Optional, Dict, Tuple, Any, List
 import numpy as np
 
 # Configure TensorFlow device (MPS for M2)
@@ -159,6 +159,7 @@ class TransformerModel:
         self.normalization_stats: Optional[Dict] = None
         self.is_trained = False
         self.history = None
+        self.feature_names: Optional[List[str]] = None
 
         logger.info(
             f"Initialized TransformerModel: seq_len={sequence_length}, "
@@ -359,6 +360,7 @@ class TransformerModel:
             "num_transformer_blocks": self.num_transformer_blocks,
             "dropout_rate": self.dropout_rate,
             "learning_rate": self.learning_rate,
+            "feature_names": self.feature_names,
             "normalization_stats": {
                 "mean": self.normalization_stats["mean"].tolist(),
                 "std": self.normalization_stats["std"].tolist()
@@ -408,6 +410,7 @@ class TransformerModel:
         self.num_transformer_blocks = metadata["num_transformer_blocks"]
         self.dropout_rate = metadata["dropout_rate"]
         self.learning_rate = metadata["learning_rate"]
+        self.feature_names = metadata.get("feature_names")
 
         if metadata["normalization_stats"]:
             self.normalization_stats = {
