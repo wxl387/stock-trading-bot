@@ -433,6 +433,22 @@ class TradingEngine:
                         new_quotes = self.broker.get_quotes(missing_symbols)
                         current_prices.update({s: q.last for s, q in new_quotes.items()})
 
+                # Adjust target weights based on ML SELL signals before rebalancing
+                if target_weights and getattr(self, 'model_loaded', False):
+                    try:
+                        signals = self.strategy.generate_signals(trading_symbols)
+                        for sym, sig in signals.items():
+                            if sig.signal == SignalType.SELL and sym in target_weights:
+                                logger.info(f"ML SELL signal for {sym}: zeroing target weight (was {target_weights[sym]:.1%})")
+                                # Redistribute weight to remaining symbols
+                                removed_weight = target_weights.pop(sym)
+                                if target_weights:
+                                    per_sym = removed_weight / len(target_weights)
+                                    for s in target_weights:
+                                        target_weights[s] += per_sym
+                    except Exception as e:
+                        logger.warning(f"Failed to adjust weights for ML signals: {e}")
+
                 # Check if rebalancing is needed
                 if target_weights and self.portfolio_rebalancer:
                     # Convert positions list to dict for rebalancer
