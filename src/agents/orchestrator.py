@@ -204,6 +204,7 @@ class AgentOrchestrator:
                 id="mi_news_scan",
                 name="Market Intelligence News Scan",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Earnings check: Every N hours (default 4)
@@ -214,6 +215,7 @@ class AgentOrchestrator:
                 id="mi_earnings_check",
                 name="Market Intelligence Earnings Check",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Macro analysis: Every N hours (default 6)
@@ -224,6 +226,7 @@ class AgentOrchestrator:
                 id="mi_macro_analysis",
                 name="Market Intelligence Macro Analysis",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Sector analysis: Daily at specified time (default 6 AM)
@@ -235,6 +238,7 @@ class AgentOrchestrator:
                 id="mi_sector_analysis",
                 name="Market Intelligence Sector Analysis",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # ============================================================
@@ -249,6 +253,7 @@ class AgentOrchestrator:
                 id="rg_risk_check",
                 name="Risk Guardian Risk Check",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Drawdown monitor: Every N minutes (default 15)
@@ -259,6 +264,7 @@ class AgentOrchestrator:
                 id="rg_drawdown_monitor",
                 name="Risk Guardian Drawdown Monitor",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Correlation check: Every N hours (default 4)
@@ -269,6 +275,7 @@ class AgentOrchestrator:
                 id="rg_correlation_check",
                 name="Risk Guardian Correlation Check",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Daily risk report: Daily at specified time (default 4 PM)
@@ -280,6 +287,7 @@ class AgentOrchestrator:
                 id="rg_daily_report",
                 name="Risk Guardian Daily Report",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # ============================================================
@@ -294,6 +302,7 @@ class AgentOrchestrator:
                 id="ps_performance_review",
                 name="Portfolio Strategist Performance Review",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Rebalancing check: Daily at specified time (default 10 AM)
@@ -305,6 +314,7 @@ class AgentOrchestrator:
                 id="ps_rebalancing_check",
                 name="Portfolio Strategist Rebalancing Check",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Day map for weekly scheduling
@@ -324,6 +334,7 @@ class AgentOrchestrator:
                     id="ps_stock_screening",
                     name="Portfolio Strategist Stock Screening",
                     replace_existing=True,
+                    max_instances=1,
                 )
             else:
                 # Weekly at specified day and time
@@ -341,6 +352,7 @@ class AgentOrchestrator:
                     id="ps_stock_screening",
                     name="Portfolio Strategist Stock Screening",
                     replace_existing=True,
+                    max_instances=1,
                 )
 
             # Portfolio review: Weekly at specified day and time
@@ -358,6 +370,7 @@ class AgentOrchestrator:
                 id="ps_portfolio_review",
                 name="Portfolio Strategist Portfolio Review",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # ============================================================
@@ -372,6 +385,7 @@ class AgentOrchestrator:
                 id="ops_process_messages",
                 name="Operations Process Messages",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Execution quality check: Every N hours (default 2)
@@ -382,6 +396,7 @@ class AgentOrchestrator:
                 id="ops_execution_quality",
                 name="Operations Execution Quality Check",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # System health check: Every N hours (default 4)
@@ -392,6 +407,7 @@ class AgentOrchestrator:
                 id="ops_system_health",
                 name="Operations System Health Check",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Degradation check: Every N hours (default 12)
@@ -402,6 +418,7 @@ class AgentOrchestrator:
                 id="ops_degradation_check",
                 name="Operations Degradation Check",
                 replace_existing=True,
+                max_instances=1,
             )
 
             # Start scheduler

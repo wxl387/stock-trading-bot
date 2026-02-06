@@ -151,7 +151,8 @@ class ScheduledRetrainer:
             trigger=trigger,
             id="model_retraining",
             name="Scheduled Model Retraining",
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
         )
 
         # Phase 18: Add degradation check job
@@ -161,7 +162,8 @@ class ScheduledRetrainer:
                 trigger=IntervalTrigger(hours=self.degradation_check_interval_hours),
                 id="degradation_check",
                 name="Model Degradation Check",
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
             )
             logger.info(
                 f"Degradation check enabled (every {self.degradation_check_interval_hours}h)"
@@ -174,7 +176,8 @@ class ScheduledRetrainer:
                 trigger=CronTrigger(hour=(self.hour + 1) % 24),
                 id="grace_period_check",
                 name="Grace Period Check",
-                replace_existing=True
+                replace_existing=True,
+                max_instances=1,
             )
             logger.info("Auto-rollback grace period check enabled (daily)")
 

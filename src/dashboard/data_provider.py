@@ -197,7 +197,7 @@ class DashboardDataProvider:
             if timestamp:
                 try:
                     date = datetime.fromisoformat(timestamp).strftime("%Y-%m-%d %H:%M")
-                except:
+                except Exception:
                     date = timestamp
             else:
                 date = "N/A"

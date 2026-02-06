@@ -58,6 +58,14 @@ credentials.json
 # Simulated trading state
 data/simulated_broker_state.json
 
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
+# Runtime state files
+data/symbol_manager_state.json
+
 # Sentiment cache
 data/sentiment_cache/
 

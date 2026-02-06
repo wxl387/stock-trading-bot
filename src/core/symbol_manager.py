@@ -189,46 +189,46 @@ class SymbolManager:
         Returns:
             True if added successfully, False otherwise
         """
-        # Check if already active
-        if symbol in self._symbols and self._symbols[symbol].is_active:
-            logger.warning(f"Symbol {symbol} is already active")
-            return False
-
-        # Check maximum symbols constraint
-        active_count = len(self.get_active_symbols())
-        if active_count >= self.max_symbols:
-            logger.warning(f"Cannot add {symbol}: at max symbols ({self.max_symbols})")
-            return False
-
-        # Check minimum score
-        if score < self.min_entry_score:
-            logger.warning(f"Cannot add {symbol}: score {score:.1f} below minimum {self.min_entry_score}")
-            return False
-
-        # Check cooldown
-        if not self._check_cooldown(symbol):
-            cooldown_entry = self._get_cooldown_entry(symbol)
-            if cooldown_entry:
-                logger.warning(f"Cannot add {symbol}: on cooldown until {cooldown_entry.cooldown_until}")
-            return False
-
-        # Check sector exposure
-        if sector and not self._check_sector_exposure(sector):
-            logger.warning(f"Cannot add {symbol}: sector {sector} at max exposure ({self.max_sector_exposure:.0%})")
-            return False
-
-        # Create entry
-        entry = SymbolEntry(
-            symbol=symbol,
-            added_date=datetime.now(),
-            add_reason=reason,
-            add_score=score,
-            sector=sector,
-            entry_price=entry_price,
-            current_price=entry_price,
-        )
-
         with self._state_lock:
+            # Check if already active
+            if symbol in self._symbols and self._symbols[symbol].is_active:
+                logger.warning(f"Symbol {symbol} is already active")
+                return False
+
+            # Check maximum symbols constraint
+            active_count = len([s for s, e in self._symbols.items() if e.is_active])
+            if active_count >= self.max_symbols:
+                logger.warning(f"Cannot add {symbol}: at max symbols ({self.max_symbols})")
+                return False
+
+            # Check minimum score
+            if score < self.min_entry_score:
+                logger.warning(f"Cannot add {symbol}: score {score:.1f} below minimum {self.min_entry_score}")
+                return False
+
+            # Check cooldown
+            if not self._check_cooldown(symbol):
+                cooldown_entry = self._get_cooldown_entry(symbol)
+                if cooldown_entry:
+                    logger.warning(f"Cannot add {symbol}: on cooldown until {cooldown_entry.cooldown_until}")
+                return False
+
+            # Check sector exposure
+            if sector and not self._check_sector_exposure(sector):
+                logger.warning(f"Cannot add {symbol}: sector {sector} at max exposure ({self.max_sector_exposure:.0%})")
+                return False
+
+            # Create entry
+            entry = SymbolEntry(
+                symbol=symbol,
+                added_date=datetime.now(),
+                add_reason=reason,
+                add_score=score,
+                sector=sector,
+                entry_price=entry_price,
+                current_price=entry_price,
+            )
+
             self._symbols[symbol] = entry
             self._save_state()
 
@@ -252,18 +252,18 @@ class SymbolManager:
         Returns:
             True if removed successfully, False otherwise
         """
-        if symbol not in self._symbols or not self._symbols[symbol].is_active:
-            logger.warning(f"Symbol {symbol} is not active")
-            return False
-
-        # Check minimum symbols constraint
-        active_count = len(self.get_active_symbols())
-        if active_count <= self.min_symbols:
-            logger.warning(f"Cannot remove {symbol}: at min symbols ({self.min_symbols})")
-            return False
-
-        # Update entry
         with self._state_lock:
+            if symbol not in self._symbols or not self._symbols[symbol].is_active:
+                logger.warning(f"Symbol {symbol} is not active")
+                return False
+
+            # Check minimum symbols constraint
+            active_count = len([s for s, e in self._symbols.items() if e.is_active])
+            if active_count <= self.min_symbols:
+                logger.warning(f"Cannot remove {symbol}: at min symbols ({self.min_symbols})")
+                return False
+
+            # Update entry
             entry = self._symbols[symbol]
             entry.is_active = False
             entry.removal_date = datetime.now()

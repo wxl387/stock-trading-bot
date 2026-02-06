@@ -94,6 +94,7 @@ class MessageQueue:
             # Enable foreign keys and WAL mode for better concurrency
             self._local.connection.execute("PRAGMA foreign_keys = ON")
             self._local.connection.execute("PRAGMA journal_mode = WAL")
+            self._local.connection.execute("PRAGMA busy_timeout = 5000")
         return self._local.connection
 
     @contextmanager

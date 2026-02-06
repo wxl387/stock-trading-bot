@@ -31,7 +31,7 @@ def get_current_prices(symbols):
             hist = ticker.history(period="1d")
             if not hist.empty:
                 prices[symbol] = hist['Close'].iloc[-1]
-        except:
+        except Exception:
             prices[symbol] = 0
     return prices
 
@@ -119,7 +119,7 @@ def get_spy_performance(start_date):
             'current': final_price,
             'return_pct': return_pct
         }
-    except:
+    except Exception:
         return None
 
 def main():
