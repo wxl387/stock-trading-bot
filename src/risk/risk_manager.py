@@ -103,10 +103,15 @@ class RiskManager:
             max_daily_trades: Maximum trades per day.
             pause_after_consecutive_losses: Pause after N consecutive losses.
         """
-        self.max_position_pct = max_position_pct
-        self.max_daily_loss_pct = max_daily_loss_pct
-        self.max_total_exposure = max_total_exposure
-        self.max_sector_exposure = max_sector_exposure
+        self.max_position_pct = min(max(max_position_pct, 0.01), 1.0)
+        self.max_daily_loss_pct = min(max(max_daily_loss_pct, 0.001), 1.0)
+        self.max_total_exposure = min(max(max_total_exposure, 0.01), 1.0)
+        self.max_sector_exposure = min(max(max_sector_exposure, 0.01), 1.0)
+        if max_position_pct != self.max_position_pct or max_daily_loss_pct != self.max_daily_loss_pct:
+            logger.warning(
+                f"Risk params clamped to valid range: max_position_pct={self.max_position_pct}, "
+                f"max_daily_loss_pct={self.max_daily_loss_pct}"
+            )
         self.max_positions = max_positions
         self.max_daily_trades = max_daily_trades
         self.pause_after_consecutive_losses = pause_after_consecutive_losses
@@ -273,6 +278,11 @@ class RiskManager:
         Returns:
             Number of shares to buy.
         """
+        # Guard against invalid entry price
+        if entry_price <= 0:
+            logger.warning(f"Invalid entry_price={entry_price}, cannot size position")
+            return 0
+
         # Maximum position based on portfolio percentage
         max_position_value = portfolio_value * self.max_position_pct
         max_shares_by_value = int(max_position_value / entry_price)

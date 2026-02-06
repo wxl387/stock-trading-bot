@@ -30,11 +30,14 @@ def _parse_time(time_str: str, default: str = "00:00") -> tuple:
     """Parse 'HH:MM' time string safely, returning (hour, minute)."""
     try:
         parts = time_str.split(":")
-        return int(parts[0]), int(parts[1])
+        hour, minute = int(parts[0]), int(parts[1])
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
+        logger.warning(f"Time out of range '{time_str}', using default '{default}'")
     except (ValueError, IndexError):
         logger.warning(f"Invalid time format '{time_str}', using default '{default}'")
-        parts = default.split(":")
-        return int(parts[0]), int(parts[1])
+    parts = default.split(":")
+    return int(parts[0]), int(parts[1])
 
 
 class AgentOrchestrator:

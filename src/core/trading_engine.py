@@ -490,10 +490,14 @@ class TradingEngine:
         Returns:
             Trade result dict or None.
         """
-        symbol = recommendation["symbol"]
-        action = recommendation["action"]
-        shares = recommendation["shares"]
-        price = recommendation["price"]
+        symbol = recommendation.get("symbol")
+        action = recommendation.get("action")
+        shares = recommendation.get("shares")
+        price = recommendation.get("price")
+
+        if not all([symbol, action, shares, price]):
+            logger.warning(f"Malformed recommendation, skipping: {recommendation}")
+            return None
 
         # Defense-in-depth: check agent halt before each trade
         if self.agent_orchestrator and self.agent_orchestrator.is_trading_halted():

@@ -312,6 +312,10 @@ class MLStrategy:
 
             else:
                 # Traditional signal-based trading (original logic)
+                if price <= 0:
+                    logger.warning(f"Skipping {symbol}: invalid price {price}")
+                    continue
+
                 if signal.signal == SignalType.BUY and current_shares == 0:
                     # New buy opportunity
                     # Calculate position size
