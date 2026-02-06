@@ -406,6 +406,7 @@ class MLStrategy:
 
         for i in range(len(df)):
             prob_up = predictions[i][1]
+            prob_down = predictions[i][0]
             current_price = df["close"].iloc[i]
 
             if prob_up >= self.confidence_threshold and position == 0:
@@ -421,7 +422,7 @@ class MLStrategy:
                         "date": df.index[i]
                     })
 
-            elif prob_up < self.min_confidence_sell and position > 0:
+            elif prob_down >= self.min_confidence_sell and position > 0:
                 # Sell
                 capital += position * current_price
                 trades.append({
