@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tradingbot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>python3</string>
+        <string>scripts/start_trading.py</string>
+        <string>--simulated</string>
+        <string>--interval</string>
+        <string>120</string>
+        <string>--ensemble</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/wenbiaoli/Desktop/trading/stock-trading-bot</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/wenbiaoli/Desktop/trading/stock-trading-bot/logs/launchd_stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/wenbiaoli/Desktop/trading/stock-trading-bot/logs/launchd_stderr.log</string>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>NetworkState</key>
+        <true/>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
