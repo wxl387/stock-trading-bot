@@ -193,7 +193,7 @@ class SimulatedBroker(BaseBroker):
 
         self.orders[order_id] = order
 
-        # Record trade
+        # Record trade (cap in-memory list to prevent unbounded growth)
         self.trades.append({
             "order_id": order_id,
             "symbol": symbol,
@@ -202,6 +202,8 @@ class SimulatedBroker(BaseBroker):
             "price": fill_price,
             "timestamp": datetime.now().isoformat()
         })
+        if len(self.trades) > 1000:
+            self.trades = self.trades[-500:]
 
         # Save state after trade
         self._save_state()

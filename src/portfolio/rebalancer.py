@@ -155,7 +155,9 @@ class PortfolioRebalancer:
             for symbol, position in current_positions.items():
                 if portfolio_value > 0:
                     # Handle both Position types (rebalancer uses 'value', broker uses 'market_value')
-                    pos_value = getattr(position, 'value', None) or getattr(position, 'market_value', 0.0)
+                    pos_value = getattr(position, 'value', None)
+                    if pos_value is None:
+                        pos_value = getattr(position, 'market_value', 0.0)
                     current_weights[symbol] = pos_value / portfolio_value
                 else:
                     current_weights[symbol] = 0.0
@@ -281,8 +283,12 @@ class PortfolioRebalancer:
                 current_position = current_positions.get(symbol)
                 # Handle both Position types (rebalancer uses 'value'/'shares', broker uses 'market_value'/'quantity')
                 if current_position:
-                    current_value = getattr(current_position, 'value', None) or getattr(current_position, 'market_value', 0.0)
-                    current_shares = getattr(current_position, 'shares', None) or getattr(current_position, 'quantity', 0)
+                    current_value = getattr(current_position, 'value', None)
+                    if current_value is None:
+                        current_value = getattr(current_position, 'market_value', 0.0)
+                    current_shares = getattr(current_position, 'shares', None)
+                    if current_shares is None:
+                        current_shares = getattr(current_position, 'quantity', 0)
                 else:
                     current_value = 0.0
                     current_shares = 0

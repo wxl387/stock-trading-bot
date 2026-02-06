@@ -207,6 +207,9 @@ class TradingEngine:
                 self.strategy.load_model("trading_model")
         except FileNotFoundError:
             logger.warning("No trained model found. Please train a model first.")
+            self.model_loaded = False
+        else:
+            self.model_loaded = True
 
         # Reset daily limits
         account = self.broker.get_account_info()
@@ -430,13 +433,17 @@ class TradingEngine:
                                 cycle_results["errors"].append(f"Rebalance {t_symbol}: {str(e)}")
 
             # Generate trading signals (use active symbols from symbol manager if available)
-            recommendations = self.strategy.get_trade_recommendations(
-                symbols=trading_symbols,
-                portfolio_value=account.portfolio_value,
-                current_positions=current_positions,
-                risk_manager=self.risk_manager,
-                target_weights=target_weights  # Pass target weights to strategy
-            )
+            if not getattr(self, 'model_loaded', False):
+                logger.warning("Skipping signal generation — no ML model loaded")
+                recommendations = []
+            else:
+                recommendations = self.strategy.get_trade_recommendations(
+                    symbols=trading_symbols,
+                    portfolio_value=account.portfolio_value,
+                    current_positions=current_positions,
+                    risk_manager=self.risk_manager,
+                    target_weights=target_weights  # Pass target weights to strategy
+                )
 
             # Execute trades
             for rec in recommendations:

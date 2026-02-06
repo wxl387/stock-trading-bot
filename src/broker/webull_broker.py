@@ -94,6 +94,14 @@ class WebullBroker(BaseBroker):
         self._ensure_connected()
 
         account = self.client.get_account()
+        if not account or not isinstance(account, dict):
+            raise ConnectionError("WeBull get_account() returned invalid data")
+
+        try:
+            positions_count = len(self.client.get_positions() or [])
+        except Exception as e:
+            logger.warning(f"Failed to fetch positions count: {e}")
+            positions_count = 0
 
         return AccountInfo(
             account_id=str(self._account_id),
@@ -101,7 +109,7 @@ class WebullBroker(BaseBroker):
             buying_power=float(account.get("dayBuyingPower", 0)),
             portfolio_value=float(account.get("totalMarketValue", 0)),
             day_trades_remaining=int(account.get("dayTradesRemaining", 0)),
-            positions_count=len(self.client.get_positions() or [])
+            positions_count=positions_count
         )
 
     def get_positions(self) -> List[Position]:

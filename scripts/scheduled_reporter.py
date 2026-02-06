@@ -103,7 +103,7 @@ class ScheduledReporter:
                 if len(condensed_report) > 1900:
                     condensed_report = condensed_report[:1900] + "\n...(truncated)"
 
-                self.discord_notifier.send_message(
+                self.discord_notifier.send(
                     f"📊 **{report_type.title()} Performance Report**\n```\n{condensed_report}\n```"
                 )
 
