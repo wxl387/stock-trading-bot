@@ -869,6 +869,36 @@ class AgentOrchestrator:
         all_messages.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         return all_messages[:limit]
 
+    def is_trading_halted(self) -> bool:
+        """
+        Check if trading is halted by any agent.
+
+        Returns:
+            True if either Risk Guardian or Operations has halted trading
+        """
+        if not self.enabled:
+            return False
+        return self.risk_guardian._trading_halted or self.operations._trading_halted
+
+    def get_halt_reason(self) -> Optional[str]:
+        """
+        Get a human-readable halt reason.
+
+        Returns:
+            Halt reason string, or None if not halted
+        """
+        if not self.enabled:
+            return None
+
+        reasons = []
+        if self.risk_guardian._trading_halted:
+            reasons.append("Risk Guardian: emergency halt active")
+        if self.operations._trading_halted:
+            reason = self.operations._halt_reason or "manual halt"
+            reasons.append(f"Operations: {reason}")
+
+        return "; ".join(reasons) if reasons else None
+
     def cleanup_old_messages(self, days: int = 30) -> int:
         """
         Clean up old messages from the queue.

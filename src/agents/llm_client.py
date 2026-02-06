@@ -45,7 +45,7 @@ class LLMClient:
     - Graceful degradation if API unavailable
     """
 
-    DEFAULT_MODEL = "claude-sonnet-4-20250514"
+    DEFAULT_MODEL = "claude-opus-4-6"
     MAX_RETRIES = 3
     RETRY_DELAY = 1.0  # seconds
 

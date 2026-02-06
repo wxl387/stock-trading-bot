@@ -6,6 +6,9 @@ monitors execution quality, and ensures system health.
 """
 
 import logging
+import os
+import tempfile
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -113,6 +116,9 @@ class OperationsAgent(BaseAgent):
         # Trading state
         self._trading_halted: bool = False
         self._halt_reason: Optional[str] = None
+
+        # Config file lock for atomic read-modify-write
+        self._config_lock = threading.Lock()
 
         # Lazy-loaded components
         self._retrainer = None
@@ -240,12 +246,15 @@ class OperationsAgent(BaseAgent):
                     result["messages_processed"] += 1
 
                     if response:
-                        self.message_queue.add_message(response)
+                        self.message_queue.enqueue(response)
                         result["messages_sent"] += 1
 
-                        # Send notification
-                        if self.notifier:
-                            self.notifier.notify_agent_message(response)
+                        # Send notification (isolated so failure doesn't block mark_processed)
+                        try:
+                            if self.notifier:
+                                self.notifier.notify_agent_message(response)
+                        except Exception as notify_err:
+                            logger.warning(f"Notification failed for message {message.id}: {notify_err}")
 
                     # Mark as processed
                     self.message_queue.mark_processed(message.id)
@@ -291,6 +300,20 @@ class OperationsAgent(BaseAgent):
 
         return None
 
+    def _has_pending_risk_halt(self) -> bool:
+        """Check if there are unprocessed urgent Risk Guardian messages."""
+        try:
+            pending = self.message_queue.get_messages_for_recipient(
+                AgentRole.OPERATIONS, processed=False
+            )
+            for msg in pending:
+                if (msg.sender == AgentRole.RISK_GUARDIAN
+                        and msg.priority == MessagePriority.URGENT):
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _handle_suggestion(self, message: AgentMessage) -> Optional[AgentMessage]:
         """Handle suggestion from other agents."""
         recommendations = message.context.get("recommendations", [])
@@ -299,6 +322,35 @@ class OperationsAgent(BaseAgent):
         # Handle emergency situations first
         if emergency_action_needed:
             return self._execute_emergency_action(message)
+
+        # Reject all trade suggestions when trading is halted
+        if self._trading_halted:
+            logger.info(f"Rejecting suggestion from {message.sender.value}: trading halted")
+            return self.create_message(
+                recipient=message.sender,
+                message_type=MessageType.RESPONSE,
+                subject="Suggestion Rejected - Trading Halted",
+                content=f"Trading is currently halted ({self._halt_reason}). "
+                        f"Suggestion deferred until trading resumes.",
+                priority=MessagePriority.NORMAL,
+                parent_message_id=message.id,
+                context={"decision": "rejected_halted"},
+            )
+
+        # Defer non-Risk-Guardian suggestions when urgent risk alerts are pending
+        # Priority: Risk Guardian > Portfolio Strategist > Market Intelligence
+        if message.sender != AgentRole.RISK_GUARDIAN and self._has_pending_risk_halt():
+            logger.info(f"Deferring suggestion from {message.sender.value}: urgent risk alerts pending")
+            return self.create_message(
+                recipient=message.sender,
+                message_type=MessageType.RESPONSE,
+                subject="Suggestion Deferred - Risk Alert Pending",
+                content="Urgent risk alerts are being processed. "
+                        "Please re-submit after risk situation is resolved.",
+                priority=MessagePriority.NORMAL,
+                parent_message_id=message.id,
+                context={"decision": "deferred_risk_pending"},
+            )
 
         # Evaluate recommendations
         if not recommendations:
@@ -691,7 +743,8 @@ class OperationsAgent(BaseAgent):
             self._halt_reason = None
             return {"success": True, "trading_halted": False}
 
-        return {"action": action, "status": "not_implemented"}
+        logger.warning(f"Unimplemented action requested: {action}")
+        return {"success": False, "action": action, "status": "not_implemented"}
 
     def _trigger_retrain(self, reason: str = "manual") -> Dict[str, Any]:
         """Trigger model retraining."""
@@ -720,14 +773,15 @@ class OperationsAgent(BaseAgent):
         self._record_action("adjust_confidence_threshold")
 
         try:
-            config = self._load_config()
-            current = config.get("ml_model", {}).get("confidence_threshold", 0.55)
+            with self._config_lock:
+                config = self._load_config()
+                current = config.get("ml_model", {}).get("confidence_threshold", 0.55)
 
-            adjustment = 0.02 if increase else -0.02
-            new_value = max(0.50, min(0.70, current + adjustment))
+                adjustment = 0.02 if increase else -0.02
+                new_value = max(0.50, min(0.70, current + adjustment))
 
-            config.setdefault("ml_model", {})["confidence_threshold"] = new_value
-            self._save_config(config)
+                config.setdefault("ml_model", {})["confidence_threshold"] = new_value
+                self._save_config(config)
 
             logger.info(f"Adjusted confidence threshold: {current:.2f} -> {new_value:.2f}")
 
@@ -746,14 +800,15 @@ class OperationsAgent(BaseAgent):
         self._record_action("adjust_position_size")
 
         try:
-            config = self._load_config()
-            current = config.get("risk_management", {}).get("max_position_pct", 0.10)
+            with self._config_lock:
+                config = self._load_config()
+                current = config.get("risk_management", {}).get("max_position_pct", 0.10)
 
-            adjustment = -0.02 if decrease else 0.02
-            new_value = max(0.02, min(0.20, current + adjustment))
+                adjustment = -0.02 if decrease else 0.02
+                new_value = max(0.02, min(0.20, current + adjustment))
 
-            config.setdefault("risk_management", {})["max_position_pct"] = new_value
-            self._save_config(config)
+                config.setdefault("risk_management", {})["max_position_pct"] = new_value
+                self._save_config(config)
 
             logger.info(f"Adjusted max position: {current:.1%} -> {new_value:.1%}")
 
@@ -772,15 +827,16 @@ class OperationsAgent(BaseAgent):
         self._record_action("adjust_stop_loss")
 
         try:
-            config = self._load_config()
-            stop_loss = config.get("risk_management", {}).get("stop_loss", {})
-            current = stop_loss.get("fixed_pct", 0.05)
+            with self._config_lock:
+                config = self._load_config()
+                stop_loss = config.get("risk_management", {}).get("stop_loss", {})
+                current = stop_loss.get("fixed_pct", 0.05)
 
-            adjustment = -0.01 if tighter else 0.01
-            new_value = max(0.02, min(0.10, current + adjustment))
+                adjustment = -0.01 if tighter else 0.01
+                new_value = max(0.02, min(0.10, current + adjustment))
 
-            config.setdefault("risk_management", {}).setdefault("stop_loss", {})["fixed_pct"] = new_value
-            self._save_config(config)
+                config.setdefault("risk_management", {}).setdefault("stop_loss", {})["fixed_pct"] = new_value
+                self._save_config(config)
 
             logger.info(f"Adjusted stop loss: {current:.1%} -> {new_value:.1%}")
 
@@ -799,26 +855,27 @@ class OperationsAgent(BaseAgent):
         self._record_action(f"toggle_{feature}")
 
         try:
-            config = self._load_config()
+            with self._config_lock:
+                config = self._load_config()
 
-            feature_paths = {
-                "degradation_detection": ("retraining", "degradation_detection", "enabled"),
-                "auto_rollback": ("retraining", "auto_rollback", "enabled"),
-            }
+                feature_paths = {
+                    "degradation_detection": ("retraining", "degradation_detection", "enabled"),
+                    "auto_rollback": ("retraining", "auto_rollback", "enabled"),
+                }
 
-            if feature not in feature_paths:
-                return {"success": False, "error": f"Unknown feature: {feature}"}
+                if feature not in feature_paths:
+                    return {"success": False, "error": f"Unknown feature: {feature}"}
 
-            path = feature_paths[feature]
-            current_config = config
-            for key in path[:-1]:
-                current_config = current_config.setdefault(key, {})
+                path = feature_paths[feature]
+                current_config = config
+                for key in path[:-1]:
+                    current_config = current_config.setdefault(key, {})
 
-            current_value = current_config.get(path[-1], False)
-            new_value = not current_value
-            current_config[path[-1]] = new_value
+                current_value = current_config.get(path[-1], False)
+                new_value = not current_value
+                current_config[path[-1]] = new_value
 
-            self._save_config(config)
+                self._save_config(config)
 
             logger.info(f"Toggled {feature}: {current_value} -> {new_value}")
 
@@ -1047,16 +1104,27 @@ class OperationsAgent(BaseAgent):
         return issues
 
     def _load_config(self) -> Dict[str, Any]:
-        """Load trading config."""
+        """Load trading config (must be called within _config_lock)."""
         import yaml
         with open(self.config_path, "r") as f:
             return yaml.safe_load(f) or {}
 
     def _save_config(self, config: Dict[str, Any]) -> None:
-        """Save trading config."""
+        """Save trading config atomically using tempfile + os.replace."""
         import yaml
-        with open(self.config_path, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        config_dir = self.config_path.parent
+        fd, tmp_path = tempfile.mkstemp(dir=config_dir, suffix=".yaml.tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            os.replace(tmp_path, self.config_path)
+        except Exception:
+            # Clean up temp file on failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _format_action_report(self, action: str, result: Dict[str, Any]) -> str:
         """Format action report."""

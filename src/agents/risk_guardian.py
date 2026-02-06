@@ -111,6 +111,7 @@ class RiskGuardianAgent(BaseAgent):
         self._peak_portfolio_value: Optional[float] = None
         self._current_drawdown: float = 0.0
         self._daily_start_value: Optional[float] = None
+        self._daily_start_date: Optional[datetime] = None
         self._daily_loss: float = 0.0
         self._trading_halted: bool = False
         self._last_correlation_matrix: Optional[pd.DataFrame] = None
@@ -276,10 +277,13 @@ class RiskGuardianAgent(BaseAgent):
             else:
                 self._current_drawdown = 0.0
 
-            # Update daily loss tracking
+            # Update daily loss tracking - reset at midnight
             today = datetime.now().date()
-            if self._daily_start_value is None:
+            if self._daily_start_date is None or today != self._daily_start_date:
                 self._daily_start_value = portfolio_value
+                self._daily_start_date = today
+                self._daily_loss = 0.0
+                logger.info(f"Daily loss tracking reset for {today}")
 
             if self._daily_start_value > 0:
                 self._daily_loss = (self._daily_start_value - portfolio_value) / self._daily_start_value

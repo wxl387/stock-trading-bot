@@ -95,7 +95,7 @@ risk_management:
 
 ml_model:
   # Model selection
-  primary_model: "xgboost"        # xgboost, lstm, cnn, or ensemble
+  primary_model: "xgboost"        # xgboost for now (ensemble after overnight training)
 
   # Prediction settings
   prediction_horizon: 5           # Days ahead to predict
@@ -135,7 +135,7 @@ ml_model:
     - vwap
 
 backtesting:
-  initial_capital: 100000
+  initial_capital: 10000
   commission: 0.0                 # WeBull is commission-free
   slippage_pct: 0.001            # 0.1% slippage assumption
 
@@ -205,7 +205,7 @@ retraining:
 
 sentiment:
   enabled: true
-  provider: "bluesky"             # bluesky, finnhub, alpha_vantage
+  provider: "finnhub"             # finnhub, alpha_vantage (bluesky removed - not free)
   analyzer: "finbert"             # finbert (local NLP on MPS GPU)
   cache_hours: 4                  # Hours to cache sentiment data
   articles_per_symbol: 50         # Number of articles to fetch per symbol
@@ -315,7 +315,7 @@ agents:
   use_llm: true                       # Use Claude API for intelligent analysis
 
   # LLM configuration
-  llm_model: "claude-opus-4-5-20251101"  # Claude model for agent intelligence
+  llm_model: "claude-opus-4-6"  # Claude model for agent intelligence
 
   # ==========================================================================
   # Market Intelligence Agent - Information gathering, news, macro analysis
@@ -327,7 +327,6 @@ agents:
     sector_analysis_time: "06:00"     # Sector analysis daily at 6 AM
     news_sources:                     # News sources to monitor
       - "finnhub"
-      - "bluesky"
     alert_on_vix_spike: 25            # Alert when VIX exceeds this level
 
   # ==========================================================================

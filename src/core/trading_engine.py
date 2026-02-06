@@ -282,6 +282,14 @@ class TradingEngine:
             positions = self.broker.get_positions()
             current_positions = {p.symbol: p.quantity for p in positions}
 
+            # Check if agents have halted trading
+            if self.agent_orchestrator and self.agent_orchestrator.is_trading_halted():
+                halt_reason = self.agent_orchestrator.get_halt_reason()
+                logger.warning(f"Trading halted by agents: {halt_reason}")
+                cycle_results["status"] = "blocked"
+                cycle_results["block_reason"] = f"Agent halt: {halt_reason}"
+                return cycle_results
+
             # Check if trading is allowed
             risk_check = self.risk_manager.check_can_trade()
             if not risk_check.approved:
@@ -472,6 +480,11 @@ class TradingEngine:
         shares = recommendation["shares"]
         price = recommendation["price"]
 
+        # Defense-in-depth: check agent halt before each trade
+        if self.agent_orchestrator and self.agent_orchestrator.is_trading_halted():
+            logger.warning(f"Trade for {symbol} blocked: agents have halted trading")
+            return None
+
         # Risk check for buys
         if action == "BUY":
             risk_check = self.risk_manager.check_position(
@@ -499,6 +512,11 @@ class TradingEngine:
             quantity=shares,
             order_type=OrderType.MARKET
         )
+
+        # Check if order was actually filled (not rejected)
+        if not order.is_filled():
+            logger.warning(f"Order not filled for {shares} {symbol}: status={order.status.value}")
+            return None
 
         logger.info(f"Executed {action} order for {shares} {symbol}")
 
@@ -547,23 +565,31 @@ class TradingEngine:
         """Execute stop loss for a position."""
         position = self.broker.get_position(symbol)
         if position and position.quantity > 0:
-            self.broker.sell(symbol, position.quantity)
+            order = self.broker.place_order(
+                symbol=symbol,
+                side=OrderSide.SELL,
+                quantity=position.quantity,
+                order_type=OrderType.MARKET,
+            )
             self.risk_manager.remove_stop_loss(symbol)
             self.risk_manager.remove_take_profit(symbol)
 
-            # Update P&L
-            pnl = position.unrealized_pnl
+            # Calculate P&L from actual fill price
+            entry_price = position.avg_cost
+            fill_price = getattr(order, "fill_price", None)
+            if not fill_price:
+                fill_price = getattr(position, "current_price", None) or entry_price
+            pnl = (fill_price - entry_price) * position.quantity
             self.risk_manager.update_pnl(pnl, is_loss=(pnl < 0))
 
-            logger.warning(f"Stop loss executed for {symbol}. P&L: ${pnl:.2f}")
+            logger.warning(f"Stop loss executed for {symbol}. Fill: ${fill_price:.2f}, P&L: ${pnl:.2f}")
 
             # Send stop-loss notification
             if self.notifier:
-                exit_price = position.current_price if hasattr(position, 'current_price') else position.avg_cost
-                loss_pct = (pnl / (position.quantity * position.avg_cost)) if position.avg_cost > 0 else 0
+                loss_pct = (pnl / (position.quantity * entry_price)) if entry_price > 0 else 0
                 self.notifier.notify_stop_loss(
                     symbol=symbol,
-                    exit_price=exit_price,
+                    exit_price=fill_price,
                     loss_amount=pnl,
                     loss_pct=loss_pct
                 )
