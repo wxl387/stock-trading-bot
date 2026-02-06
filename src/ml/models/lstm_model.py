@@ -6,15 +6,14 @@ import json
 from pathlib import Path
 from typing import Optional, Dict, Tuple, Any, List
 import numpy as np
-import pandas as pd
 
-# Configure TensorFlow device (MPS for M2)
+# Import TensorFlow BEFORE pandas to avoid model.fit() deadlock
+# (pandas 2.3+ / TF 2.20+ import order bug on macOS)
 from src.ml.device_config import configure_tensorflow_device, log_device_info
-
-# Configure device before importing TensorFlow
 _DEVICE = configure_tensorflow_device()
-
 import tensorflow as tf
+
+import pandas as pd
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization

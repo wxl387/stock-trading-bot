@@ -9,8 +9,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import pandas as pd
 import numpy as np
+
+# Import TF BEFORE pandas to avoid model.fit() deadlock
+# (pandas 2.3+ / TF 2.20+ import order bug on macOS)
+import tensorflow as tf  # noqa: F401
+
+import pandas as pd
 
 from config.settings import MODELS_DIR, DATA_DIR
 from src.data.data_fetcher import DataFetcher

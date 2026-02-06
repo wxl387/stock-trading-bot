@@ -11,11 +11,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import argparse
 import logging
 import numpy as np
+# Import TF/model BEFORE data modules (pandas) to avoid model.fit() deadlock
+# (pandas 2.3+ / TF 2.20+ import order bug on macOS)
+from src.ml.models.lstm_model import LSTMModel
+from src.ml.sequence_utils import create_sequences, split_sequences_time_series
 from config.settings import setup_logging, Settings
 from src.data.data_fetcher import DataFetcher
 from src.data.feature_engineer import FeatureEngineer
-from src.ml.models.lstm_model import LSTMModel
-from src.ml.sequence_utils import create_sequences, split_sequences_time_series
 
 logger = setup_logging()
 
