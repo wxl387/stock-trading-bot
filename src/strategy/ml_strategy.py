@@ -277,9 +277,12 @@ class MLStrategy:
 
             if use_portfolio_weights and symbol in target_weights:
                 # Portfolio optimization mode: use target weights
+                if not (price > 0 and np.isfinite(price)):
+                    logger.warning(f"Skipping {symbol}: invalid price {price}")
+                    continue
                 target_weight = target_weights[symbol]
                 target_value = portfolio_value * target_weight
-                target_shares = int(target_value / price) if price > 0 else 0
+                target_shares = int(target_value / price)
                 shares_diff = target_shares - current_shares
 
                 # Only trade if difference is significant (>5% of target or >$100)

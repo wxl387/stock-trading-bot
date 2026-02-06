@@ -4,7 +4,7 @@ Discord notification module using webhooks.
 import logging
 import requests
 from typing import Optional, Dict, List, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from config.settings import settings
 
@@ -91,7 +91,7 @@ class DiscordNotifier:
             "title": title,
             "description": description,
             "color": color,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         if fields:

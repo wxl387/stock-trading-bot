@@ -306,6 +306,8 @@ class PortfolioOptimizer:
         Returns:
             Dict mapping symbol to weight
         """
+        if not symbols:
+            return {}
         n = len(symbols)
         weight = 1.0 / n
         return {symbol: weight for symbol in symbols}

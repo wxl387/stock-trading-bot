@@ -4,7 +4,8 @@ Main trading engine that orchestrates all components.
 import logging
 import signal
 import time
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional
 import schedule
 
@@ -749,11 +750,11 @@ class TradingEngine:
             return None
 
     def _is_market_open(self) -> bool:
-        """Check if market is currently open."""
+        """Check if market is currently open (US Eastern Time)."""
         if self.ignore_market_hours:
             return True
 
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("US/Eastern"))
 
         # Check if weekday
         if now.weekday() >= 5:  # Saturday or Sunday

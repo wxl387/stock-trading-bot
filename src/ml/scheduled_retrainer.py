@@ -13,6 +13,7 @@ from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from zoneinfo import ZoneInfo
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config.settings import Settings, MODELS_DIR
@@ -173,7 +174,7 @@ class ScheduledRetrainer:
         if self.auto_rollback_enabled and self._rollback_manager:
             self.scheduler.add_job(
                 self.run_grace_period_check,
-                trigger=CronTrigger(hour=(self.hour + 1) % 24),
+                trigger=CronTrigger(hour=(self.hour + 1) % 24, timezone=ZoneInfo("US/Eastern")),
                 id="grace_period_check",
                 name="Grace Period Check",
                 replace_existing=True,
@@ -195,16 +196,17 @@ class ScheduledRetrainer:
             logger.info("Scheduled retraining stopped")
 
     def _create_trigger(self) -> CronTrigger:
-        """Create cron trigger based on schedule type."""
+        """Create cron trigger based on schedule type (US Eastern Time)."""
+        tz = ZoneInfo("US/Eastern")
         if self.schedule == "daily":
-            return CronTrigger(hour=self.hour)
+            return CronTrigger(hour=self.hour, timezone=tz)
         elif self.schedule == "weekly":
-            return CronTrigger(day_of_week=self.day_of_week, hour=self.hour)
+            return CronTrigger(day_of_week=self.day_of_week, hour=self.hour, timezone=tz)
         elif self.schedule == "monthly":
-            return CronTrigger(day=1, hour=self.hour)
+            return CronTrigger(day=1, hour=self.hour, timezone=tz)
         else:
             # Default to weekly
-            return CronTrigger(day_of_week="sun", hour=2)
+            return CronTrigger(day_of_week="sun", hour=2, timezone=tz)
 
     def run_retrain(self, trigger_reason: str = "scheduled") -> Dict:
         """
