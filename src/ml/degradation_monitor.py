@@ -420,6 +420,7 @@ class DegradationMonitor:
             log["checks"].append(report.to_dict())
             log["checks"] = log["checks"][-200:]  # Keep last 200
 
+            self.monitoring_log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.monitoring_log_path, "w") as f:
                 json.dump(log, f, indent=2)
         except Exception as e:
@@ -441,7 +442,8 @@ class DegradationMonitor:
                 checks = [c for c in checks if c.get("model_type") == model_type]
 
             return checks[-limit:][::-1]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to load monitoring history: {e}")
             return []
 
     def _get_feature_columns(self, df: pd.DataFrame) -> List[str]:

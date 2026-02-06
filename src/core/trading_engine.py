@@ -89,7 +89,7 @@ class TradingEngine:
         self.broker: Optional[BaseBroker] = None
         ml_config = self.config.get("ml_model", {})
         self.strategy = MLStrategy(
-            confidence_threshold=ml_config.get("confidence_threshold", 0.6),
+            confidence_threshold=ml_config.get("confidence_threshold", 0.55),
             min_confidence_sell=ml_config.get("min_confidence_sell", 0.55),
         )
         self.risk_manager = RiskManager(

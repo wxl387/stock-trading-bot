@@ -47,8 +47,13 @@ class Settings:
         """Load trading configuration from YAML file."""
         config_path = CONFIG_DIR / "trading_config.yaml"
         if config_path.exists():
-            with open(config_path, "r") as f:
-                return yaml.safe_load(f) or {}
+            try:
+                with open(config_path, "r") as f:
+                    return yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to parse {config_path}: {e}")
+                return {}
         return {}
 
     @classmethod
