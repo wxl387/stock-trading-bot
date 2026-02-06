@@ -141,14 +141,14 @@ class MLStrategy:
                 logger.warning(f"No data for {symbol}")
                 return self._hold_signal(symbol, reason="No data")
 
-            # Add features (including extended features for better accuracy)
+            # Add features (must match training flags in src/ml/training.py)
             df = self.feature_engineer.add_all_features_extended(
                 df,
                 symbol=symbol,
-                include_sentiment=True,
-                include_macro=True,
+                include_sentiment=False,
+                include_macro=False,
                 include_cross_asset=True,
-                include_interactions=True,
+                include_interactions=False,
                 include_lagged=True,
                 use_cache=True
             )
@@ -171,8 +171,8 @@ class MLStrategy:
                     feature_history=feature_history
                 )
 
-                # Calculate prob_up from ensemble
-                prob_up = sum(model_probs.values()) / len(model_probs) if model_probs else 0.5
+                # Use ensemble's weighted prediction (confidence = max(prob, 1-prob))
+                prob_up = confidence if prediction == 1 else (1 - confidence)
                 prob_down = 1 - prob_up
 
                 # Log individual model predictions
@@ -436,6 +436,10 @@ class MLStrategy:
         """Get feature columns from DataFrame."""
         # Use model's feature names if available for exact match
         if self.model is not None and hasattr(self.model, 'feature_names') and self.model.feature_names:
+            missing = [f for f in self.model.feature_names if f not in df.columns]
+            if missing:
+                logger.warning(f"Missing {len(missing)} model features: {missing[:5]}...")
+                return [f for f in self.model.feature_names if f in df.columns]
             return self.model.feature_names
 
         # Fallback: exclude non-feature columns

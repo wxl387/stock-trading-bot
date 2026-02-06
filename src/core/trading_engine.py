@@ -352,6 +352,12 @@ class TradingEngine:
                     "target_price": target_price
                 })
 
+            # Refresh positions after stop-loss/take-profit to avoid stale data
+            if triggered_stops or triggered_tps:
+                positions = self.broker.get_positions()
+                current_positions = {p.symbol: p.quantity for p in positions}
+                position_market_values = {p.symbol: p.market_value for p in positions}
+
             # Update trailing stops
             for symbol in current_positions:
                 if symbol in current_prices:
@@ -368,6 +374,13 @@ class TradingEngine:
             if self.portfolio_optimizer:
                 # Get target portfolio weights
                 target_weights = self._get_target_portfolio_weights()
+
+                # Fetch prices for new symbols in target_weights not already priced
+                if target_weights:
+                    missing_symbols = [s for s in target_weights if s not in current_prices]
+                    if missing_symbols:
+                        new_quotes = self.broker.get_quotes(missing_symbols)
+                        current_prices.update({s: q.last for s, q in new_quotes.items()})
 
                 # Check if rebalancing is needed
                 if target_weights and self.portfolio_rebalancer:
