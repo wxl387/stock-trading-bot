@@ -425,6 +425,11 @@ class WalkForwardOptimizer:
                     probas = model.predict_proba(X_test)
                     prob_up = probas[:, 1] if probas.ndim > 1 else probas
 
+                    if len(prob_up) != len(test_df):
+                        logger.warning(
+                            f"Prediction length mismatch for {symbol}: "
+                            f"{len(prob_up)} predictions vs {len(test_df)} test samples"
+                        )
                     for i, (date, price) in enumerate(test_df['close'].items()):
                         if i < len(prob_up):
                             test_signals.append({
@@ -602,8 +607,9 @@ class WalkForwardOptimizer:
                         exit_price = min(effective_stop, day_low) if day_low < effective_stop else effective_stop
                         proceeds = pos["shares"] * exit_price * (1 - self.commission - self.slippage)
                         capital += proceeds
+                        entry_cost = pos["shares"] * pos["entry_price"] * (1 + self.commission + self.slippage)
                         trade_ret = (exit_price - pos["entry_price"]) / pos["entry_price"]
-                        pnl = proceeds - (pos["shares"] * pos["entry_price"])
+                        pnl = proceeds - entry_cost
                         trade_record = {"return": trade_ret, "pnl": pnl}
                         trades.append(trade_record)
                         completed_trades.append(trade_record)
@@ -620,8 +626,9 @@ class WalkForwardOptimizer:
                             del trailing_stops[sym]
                         proceeds = pos["shares"] * price * (1 - self.commission - self.slippage)
                         capital += proceeds
+                        entry_cost = pos["shares"] * pos["entry_price"] * (1 + self.commission + self.slippage)
                         trade_ret = (price - pos["entry_price"]) / pos["entry_price"]
-                        pnl = proceeds - (pos["shares"] * pos["entry_price"])
+                        pnl = proceeds - entry_cost
                         trade_record = {"return": trade_ret, "pnl": pnl}
                         trades.append(trade_record)
                         completed_trades.append(trade_record)
@@ -671,10 +678,11 @@ class WalkForwardOptimizer:
         for sym, pos in positions.items():
             if sym in prices:
                 last_price = prices[sym].iloc[-1]
-                proceeds = pos["shares"] * last_price
+                proceeds = pos["shares"] * last_price * (1 - self.commission - self.slippage)
                 capital += proceeds
+                entry_cost = pos["shares"] * pos["entry_price"] * (1 + self.commission + self.slippage)
                 trade_ret = (last_price - pos["entry_price"]) / pos["entry_price"]
-                pnl = proceeds - (pos["shares"] * pos["entry_price"])
+                pnl = proceeds - entry_cost
                 trade_record = {"return": trade_ret, "pnl": pnl}
                 trades.append(trade_record)
                 completed_trades.append(trade_record)

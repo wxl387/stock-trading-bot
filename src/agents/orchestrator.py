@@ -26,6 +26,17 @@ from .operations_agent import OperationsAgent
 logger = logging.getLogger(__name__)
 
 
+def _parse_time(time_str: str, default: str = "00:00") -> tuple:
+    """Parse 'HH:MM' time string safely, returning (hour, minute)."""
+    try:
+        parts = time_str.split(":")
+        return int(parts[0]), int(parts[1])
+    except (ValueError, IndexError):
+        logger.warning(f"Invalid time format '{time_str}', using default '{default}'")
+        parts = default.split(":")
+        return int(parts[0]), int(parts[1])
+
+
 class AgentOrchestrator:
     """
     Coordinates the 4-agent trading system using APScheduler.
@@ -217,7 +228,7 @@ class AgentOrchestrator:
 
             # Sector analysis: Daily at specified time (default 6 AM)
             sector_analysis_time = mi_config.get("sector_analysis_time", "06:00")
-            hour, minute = map(int, sector_analysis_time.split(":"))
+            hour, minute = _parse_time(sector_analysis_time, "06:00")
             self.scheduler.add_job(
                 self._run_sector_analysis,
                 trigger=CronTrigger(hour=hour, minute=minute),
@@ -262,7 +273,7 @@ class AgentOrchestrator:
 
             # Daily risk report: Daily at specified time (default 4 PM)
             daily_report_time = rg_config.get("daily_report_time", "16:00")
-            hour, minute = map(int, daily_report_time.split(":"))
+            hour, minute = _parse_time(daily_report_time, "16:00")
             self.scheduler.add_job(
                 self._run_daily_risk_report,
                 trigger=CronTrigger(hour=hour, minute=minute),
@@ -287,7 +298,7 @@ class AgentOrchestrator:
 
             # Rebalancing check: Daily at specified time (default 10 AM)
             rebalancing_check_time = ps_config.get("rebalancing_check_time", "10:00")
-            hour, minute = map(int, rebalancing_check_time.split(":"))
+            hour, minute = _parse_time(rebalancing_check_time, "10:00")
             self.scheduler.add_job(
                 self._run_rebalancing_check,
                 trigger=CronTrigger(hour=hour, minute=minute),
@@ -318,7 +329,7 @@ class AgentOrchestrator:
                 # Weekly at specified day and time
                 screening_day = ps_config.get("stock_screening_day", "sunday")
                 screening_time = ps_config.get("stock_screening_time", "18:00")
-                screening_hour, screening_minute = map(int, screening_time.split(":"))
+                screening_hour, screening_minute = _parse_time(screening_time, "18:00")
                 screening_dow = day_map.get(screening_day.lower(), 6)
                 self.scheduler.add_job(
                     self._run_stock_screening,
@@ -335,7 +346,7 @@ class AgentOrchestrator:
             # Portfolio review: Weekly at specified day and time
             review_day = ps_config.get("portfolio_review_day", "monday")
             review_time = ps_config.get("portfolio_review_time", "09:00")
-            review_hour, review_minute = map(int, review_time.split(":"))
+            review_hour, review_minute = _parse_time(review_time, "09:00")
             review_dow = day_map.get(review_day.lower(), 0)
             self.scheduler.add_job(
                 self._run_portfolio_review,

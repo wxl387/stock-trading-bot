@@ -265,7 +265,7 @@ class Backtester:
 
         # Close any remaining position
         if position > 0:
-            capital += position * prices.iloc[-1]
+            capital += position * prices.iloc[-1] * (1 - self.commission - self.slippage)
 
         # Calculate metrics
         trades_df = pd.DataFrame(trades)
@@ -337,9 +337,9 @@ class Backtester:
         for i in range(len(prices)):
             if entries.iloc[i] and position == 0:
                 position = int(capital * 0.95 / prices.iloc[i])
-                capital -= position * prices.iloc[i]
+                capital -= position * prices.iloc[i] * (1 + self.commission + self.slippage)
             elif exits.iloc[i] and position > 0:
-                capital += position * prices.iloc[i]
+                capital += position * prices.iloc[i] * (1 - self.commission - self.slippage)
                 position = 0
 
             current_equity = capital + position * prices.iloc[i]
@@ -1184,7 +1184,7 @@ class Backtester:
             win_rate = len(wins) / len(combined_trades)
             total_wins = wins["pnl"].sum() if len(wins) > 0 else 0
             total_losses = abs(losses["pnl"].sum()) if len(losses) > 0 else 1
-            profit_factor = total_wins / total_losses if total_losses > 0 else 0
+            profit_factor = total_wins / total_losses if total_losses > 0 else float("inf")
         else:
             win_rate = 0
             profit_factor = 0

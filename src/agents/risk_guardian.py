@@ -280,10 +280,13 @@ class RiskGuardianAgent(BaseAgent):
             # Update daily loss tracking - reset at midnight
             today = datetime.now().date()
             if self._daily_start_date is None or today != self._daily_start_date:
-                self._daily_start_value = portfolio_value
-                self._daily_start_date = today
-                self._daily_loss = 0.0
-                logger.info(f"Daily loss tracking reset for {today}")
+                if portfolio_value is not None and portfolio_value > 0:
+                    self._daily_start_value = portfolio_value
+                    self._daily_start_date = today
+                    self._daily_loss = 0.0
+                    logger.info(f"Daily loss tracking reset for {today}")
+                else:
+                    logger.warning(f"Cannot reset daily loss: portfolio_value={portfolio_value}")
 
             if self._daily_start_value > 0:
                 self._daily_loss = (self._daily_start_value - portfolio_value) / self._daily_start_value

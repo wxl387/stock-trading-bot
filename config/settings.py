@@ -47,7 +47,7 @@ class Settings:
         config_path = CONFIG_DIR / "trading_config.yaml"
         if config_path.exists():
             with open(config_path, "r") as f:
-                return yaml.safe_load(f)
+                return yaml.safe_load(f) or {}
         return {}
 
     @classmethod

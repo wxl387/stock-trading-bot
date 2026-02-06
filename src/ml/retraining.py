@@ -3,7 +3,9 @@ Automated model retraining pipeline with versioning.
 """
 import logging
 import json
+import os
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -939,9 +941,21 @@ class RetrainingPipeline:
         return {}
 
     def _save_registry(self, registry: Dict) -> None:
-        """Save version registry."""
-        with open(self.registry_path, "w") as f:
-            json.dump(registry, f, indent=2)
+        """Save version registry (atomic write)."""
+        self.registry_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=self.registry_path.parent, suffix=".json.tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(registry, f, indent=2)
+            os.replace(tmp_path, self.registry_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _get_feature_columns(self, df: pd.DataFrame) -> List[str]:
         """Get feature columns from DataFrame."""

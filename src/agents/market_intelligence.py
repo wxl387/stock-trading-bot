@@ -458,7 +458,7 @@ class MarketIntelligenceAgent(BaseAgent):
                     return {
                         "current": current_vix,
                         "previous": prev_vix,
-                        "change": (current_vix - prev_vix) / prev_vix * 100,
+                        "change": (current_vix - prev_vix) / prev_vix * 100 if prev_vix != 0 else 0,
                         "threshold": self.alert_on_vix_spike,
                     }
         except Exception as e:
