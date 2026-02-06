@@ -3,6 +3,7 @@ Application settings and configuration management.
 """
 import os
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from dotenv import load_dotenv
 import yaml
@@ -64,13 +65,17 @@ def setup_logging():
     # Create logs directory if needed
     LOGS_DIR.mkdir(exist_ok=True)
 
-    # Configure root logger
+    # Configure root logger with rotating file handler (10MB max, 5 backups)
     logging.basicConfig(
         level=log_level,
         format=log_format,
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(LOGS_DIR / "trading_bot.log")
+            RotatingFileHandler(
+                LOGS_DIR / "trading_bot.log",
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+            )
         ]
     )
 

@@ -193,6 +193,12 @@ class SimulatedBroker(BaseBroker):
 
         self.orders[order_id] = order
 
+        # Cap orders dict to prevent unbounded growth
+        if len(self.orders) > 1000:
+            sorted_ids = sorted(self.orders.keys(), key=lambda k: self.orders[k].created_at)
+            for old_id in sorted_ids[:500]:
+                del self.orders[old_id]
+
         # Record trade (cap in-memory list to prevent unbounded growth)
         self.trades.append({
             "order_id": order_id,

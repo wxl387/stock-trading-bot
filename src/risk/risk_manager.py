@@ -216,6 +216,14 @@ class RiskManager:
 
         position_value = quantity * price
 
+        # Guard against zero portfolio value
+        if portfolio_value <= 0:
+            return RiskCheckResult(
+                approved=False,
+                reason=f"Invalid portfolio value: ${portfolio_value:,.2f}",
+                adjusted_quantity=0
+            )
+
         # Check position size
         position_pct = position_value / portfolio_value
         if position_pct > self.max_position_pct:

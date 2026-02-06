@@ -2,13 +2,14 @@
 Main trading engine that orchestrates all components.
 """
 import logging
+import signal
 import time
 from datetime import datetime, time as dt_time
 from typing import List, Dict, Optional
 import schedule
 
 from config.settings import settings, Settings
-from src.broker.base_broker import BaseBroker, OrderSide, OrderType
+from src.broker.base_broker import BaseBroker, OrderSide, OrderStatus, OrderType
 from src.broker.simulated_broker import SimulatedBroker
 from src.strategy.ml_strategy import MLStrategy, SignalType
 from src.risk.risk_manager import RiskManager, StopLossType
@@ -528,11 +529,16 @@ class TradingEngine:
         )
 
         # Check if order was actually filled (not rejected)
-        if not order.is_filled():
+        if order.is_filled():
+            logger.info(f"Executed {action} order for {shares} {symbol}")
+        elif order.status == OrderStatus.PARTIALLY_FILLED and order.filled_quantity > 0:
+            logger.warning(
+                f"Partial fill for {symbol}: {order.filled_quantity}/{shares} shares filled"
+            )
+            shares = order.filled_quantity
+        else:
             logger.warning(f"Order not filled for {shares} {symbol}: status={order.status.value}")
             return None
-
-        logger.info(f"Executed {action} order for {shares} {symbol}")
 
         # Send trade notification
         if self.notifier:
@@ -871,6 +877,13 @@ def run_bot(
         ignore_market_hours=ignore_market_hours,
         use_ensemble=use_ensemble
     )
+
+    # Handle SIGTERM (Docker/systemd) the same as SIGINT (Ctrl+C)
+    def _handle_sigterm(signum, frame):
+        logger.info("Received SIGTERM — initiating graceful shutdown")
+        engine.is_running = False
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
 
     try:
         engine.start()
