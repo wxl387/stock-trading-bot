@@ -107,6 +107,7 @@ class XGBoostModel:
         self.model.fit(
             X, y,
             eval_set=eval_sets,
+            early_stopping_rounds=early_stopping_rounds if eval_set is not None else None,
             verbose=False
         )
 

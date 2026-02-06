@@ -281,6 +281,7 @@ class TradingEngine:
             account = self.broker.get_account_info()
             positions = self.broker.get_positions()
             current_positions = {p.symbol: p.quantity for p in positions}
+            position_market_values = {p.symbol: p.market_value for p in positions}
 
             # Check if agents have halted trading
             if self.agent_orchestrator and self.agent_orchestrator.is_trading_halted():
@@ -436,7 +437,7 @@ class TradingEngine:
             # Execute trades
             for rec in recommendations:
                 try:
-                    trade_result = self._execute_trade(rec, account.portfolio_value, current_positions)
+                    trade_result = self._execute_trade(rec, account.portfolio_value, current_positions, position_market_values)
                     if trade_result:
                         cycle_results["trades"].append(trade_result)
                 except Exception as e:
@@ -462,7 +463,8 @@ class TradingEngine:
         self,
         recommendation: Dict,
         portfolio_value: float,
-        current_positions: Dict[str, int]
+        current_positions: Dict[str, int],
+        position_market_values: Optional[Dict[str, float]] = None
     ) -> Optional[Dict]:
         """
         Execute a trade recommendation.
@@ -470,7 +472,8 @@ class TradingEngine:
         Args:
             recommendation: Trade recommendation dict.
             portfolio_value: Current portfolio value.
-            current_positions: Current positions.
+            current_positions: Current positions (symbol -> quantity).
+            position_market_values: Current position market values (symbol -> $value).
 
         Returns:
             Trade result dict or None.
@@ -492,7 +495,7 @@ class TradingEngine:
                 quantity=shares,
                 price=price,
                 portfolio_value=portfolio_value,
-                current_positions={s: shares * price for s, shares in current_positions.items()}
+                current_positions=position_market_values or {s: qty * price for s, qty in current_positions.items()}
             )
 
             if not risk_check.approved:
@@ -576,7 +579,7 @@ class TradingEngine:
 
             # Calculate P&L from actual fill price
             entry_price = position.avg_cost
-            fill_price = getattr(order, "fill_price", None)
+            fill_price = getattr(order, "filled_price", None)
             if not fill_price:
                 fill_price = getattr(position, "current_price", None) or entry_price
             pnl = (fill_price - entry_price) * position.quantity
@@ -605,12 +608,16 @@ class TradingEngine:
         if sell_qty <= 0:
             return
 
-        self.broker.sell(symbol, sell_qty)
+        order = self.broker.sell(symbol, sell_qty)
+        if order is None or (hasattr(order, 'status') and order.status.value == "rejected"):
+            logger.warning(f"Take-profit sell FAILED for {symbol}: order rejected or None")
+            return
 
         # Calculate P&L for partial sale
         entry_price = position.avg_cost
-        pnl = (target_price - entry_price) * sell_qty
-        self.risk_manager.update_pnl(pnl, is_loss=False)
+        fill = getattr(order, "filled_price", None) or target_price
+        pnl = (fill - entry_price) * sell_qty
+        self.risk_manager.update_pnl(pnl, is_loss=(pnl < 0))
 
         logger.info(f"Take-profit executed for {symbol}: sold {sell_qty} shares. P&L: ${pnl:.2f}")
 

@@ -264,7 +264,10 @@ class StockScreener:
 
         self._cache_timestamp = datetime.now()
 
-        logger.info(f"Scored {len(scores)} stocks. Top: {scores[0].symbol} ({scores[0].total_score:.1f})")
+        if scores:
+            logger.info(f"Scored {len(scores)} stocks. Top: {scores[0].symbol} ({scores[0].total_score:.1f})")
+        else:
+            logger.warning("No stocks scored successfully")
         return scores
 
     def get_top_stocks(

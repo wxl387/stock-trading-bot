@@ -156,12 +156,13 @@ class FeatureEngineer:
         bb_std = df["close"].rolling(window=20).std()
         df["bb_upper"] = df["bb_middle"] + (bb_std * 2)
         df["bb_lower"] = df["bb_middle"] - (bb_std * 2)
-        df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_middle"]
-        df["bb_position"] = (df["close"] - df["bb_lower"]) / (df["bb_upper"] - df["bb_lower"])
+        bb_range = df["bb_upper"] - df["bb_lower"]
+        df["bb_width"] = (bb_range / df["bb_middle"]).replace([np.inf, -np.inf], np.nan)
+        df["bb_position"] = ((df["close"] - df["bb_lower"]) / bb_range.replace(0, np.nan))
 
         # ATR - Average True Range
         df["atr_14"] = self._calculate_atr(df, period=14)
-        df["atr_pct"] = df["atr_14"] / df["close"]
+        df["atr_pct"] = (df["atr_14"] / df["close"].replace(0, np.nan))
 
         # Historical Volatility
         df["volatility_20d"] = df["log_returns"].rolling(window=20).std() * np.sqrt(252)
@@ -180,7 +181,7 @@ class FeatureEngineer:
 
         # Volume moving averages
         df["volume_sma_20"] = df["volume"].rolling(window=20).mean()
-        df["volume_ratio"] = df["volume"] / df["volume_sma_20"]
+        df["volume_ratio"] = (df["volume"] / df["volume_sma_20"].replace(0, np.nan))
 
         # On-Balance Volume
         df["obv"] = self._calculate_obv(df)
@@ -284,8 +285,9 @@ class FeatureEngineer:
         gain = delta.where(delta > 0, 0).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
-        rs = gain / loss
-        return 100 - (100 / (1 + rs))
+        rs = gain / loss.replace(0, np.nan)
+        rsi = 100 - (100 / (1 + rs))
+        return rsi.fillna(100.0)  # RSI=100 when loss=0 (pure uptrend)
 
     def _calculate_true_range(self, df: pd.DataFrame) -> pd.Series:
         """Calculate True Range."""
