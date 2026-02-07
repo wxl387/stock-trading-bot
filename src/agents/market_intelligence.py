@@ -74,6 +74,7 @@ class MarketIntelligenceAgent(BaseAgent):
         self.sector_analysis_time = mi_config.get("sector_analysis_time", "06:00")
         self.news_sources = mi_config.get("news_sources", ["finnhub", "bluesky"])
         self.alert_on_vix_spike = mi_config.get("alert_on_vix_spike", 25)
+        self.news_significance_threshold = mi_config.get("news_significance_threshold", 0.3)
 
         # Track last analysis times
         self._last_news_scan: Optional[datetime] = None
@@ -197,7 +198,7 @@ class MarketIntelligenceAgent(BaseAgent):
 
                             # Check for significant news (high sentiment magnitude)
                             sentiment = item.get("sentiment_score", 0)
-                            if abs(sentiment) > 0.5:
+                            if abs(sentiment) > self.news_significance_threshold:
                                 significant_news.append(item)
                 except Exception as e:
                     logger.warning(f"Failed to fetch news for {symbol}: {e}")

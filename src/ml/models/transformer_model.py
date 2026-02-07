@@ -62,6 +62,15 @@ class TransformerBlock(keras.layers.Layer):
         self.dropout1 = Dropout(dropout_rate)
         self.dropout2 = Dropout(dropout_rate)
 
+    def build(self, input_shape):
+        self.att.build(input_shape, input_shape)
+        self.ffn.build(input_shape)
+        self.layernorm1.build(input_shape)
+        self.layernorm2.build(input_shape)
+        self.dropout1.build(input_shape)
+        self.dropout2.build(input_shape)
+        super().build(input_shape)
+
     def call(self, inputs, training=False):
         # Multi-head attention
         attn_output = self.att(inputs, inputs)

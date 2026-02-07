@@ -24,7 +24,7 @@ def main():
                         help="Historical period (e.g., 6mo, 1y, 2y)")
     parser.add_argument("--capital", type=float, default=100000,
                         help="Initial capital")
-    parser.add_argument("--confidence", type=float, default=0.6,
+    parser.add_argument("--confidence", type=float, default=0.55,
                         help="Confidence threshold for trades")
     parser.add_argument("--max-positions", type=int, default=5,
                         help="Maximum concurrent positions")
