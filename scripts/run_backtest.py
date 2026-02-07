@@ -102,7 +102,10 @@ def main():
         print("  Note: Full portfolio optimization in backtest is planned for future release")
     print("=" * 60)
 
-    # Import here to avoid slow startup
+    # Import TF before pandas to avoid model.predict() deadlock on macOS
+    from src.ml.device_config import configure_tensorflow_device
+    configure_tensorflow_device()
+
     from src.backtest.backtester import Backtester
 
     # Create backtester

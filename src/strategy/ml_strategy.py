@@ -397,7 +397,21 @@ class MLStrategy:
 
         # Generate predictions for all rows
         X = df[feature_cols]
-        predictions = self.model.predict_proba(X)
+
+        if self.model_type == "ensemble" and isinstance(self.model, EnsembleModel):
+            # Create sequences for LSTM/CNN models in ensemble
+            from src.ml.sequence_utils import create_sequences
+            X_seq, _ = create_sequences(
+                X, pd.Series(np.zeros(len(X)), index=X.index),
+                self.sequence_length
+            )
+            # Align: sequences start at index sequence_length
+            X_flat = X.iloc[self.sequence_length:]
+            predictions = self.model.predict_proba(X_flat, X_seq)
+            # Trim df to match prediction length
+            df = df.iloc[self.sequence_length:]
+        else:
+            predictions = self.model.predict_proba(X)
 
         # Simulate trading
         capital = initial_capital
