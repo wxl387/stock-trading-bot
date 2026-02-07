@@ -63,8 +63,7 @@ class XGBoostModel:
             "reg_lambda": reg_lambda,
             "random_state": random_state,
             "objective": "binary:logistic",
-            "eval_metric": "logloss",
-            "use_label_encoder": False
+            "eval_metric": "logloss"
         }
 
         self.model: Optional[xgb.XGBClassifier] = None

@@ -227,7 +227,7 @@ class FeatureEngineer:
 
         # Autocorrelation
         df["returns_autocorr_5d"] = df["returns_1d"].rolling(window=20).apply(
-            lambda x: x.autocorr(lag=5) if len(x) > 5 else np.nan, raw=False
+            lambda x: x.autocorr(lag=5) if len(x) > 6 else np.nan, raw=False
         )
 
         return df
@@ -305,6 +305,8 @@ class FeatureEngineer:
     def _calculate_obv(self, df: pd.DataFrame) -> pd.Series:
         """Calculate On-Balance Volume."""
         obv = pd.Series(index=df.index, dtype=float)
+        if len(df) == 0:
+            return obv
         obv.iloc[0] = 0
 
         for i in range(1, len(df)):

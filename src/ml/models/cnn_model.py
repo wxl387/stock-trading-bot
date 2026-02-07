@@ -317,7 +317,7 @@ class CNNModel:
         self.learning_rate = metadata["learning_rate"]
         self.feature_names = metadata.get("feature_names", [])
 
-        if metadata["normalization_stats"]:
+        if metadata.get("normalization_stats"):
             self.normalization_stats = {
                 "mean": np.array(metadata["normalization_stats"]["mean"]),
                 "std": np.array(metadata["normalization_stats"]["std"])
