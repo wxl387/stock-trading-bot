@@ -333,7 +333,7 @@ class MLStrategy:
 
             else:
                 # Traditional signal-based trading (original logic)
-                if price <= 0:
+                if not (price > 0 and np.isfinite(price)):
                     logger.warning(f"Skipping {symbol}: invalid price {price}")
                     continue
 
@@ -408,6 +408,9 @@ class MLStrategy:
             prob_up = predictions[i][1]
             prob_down = predictions[i][0]
             current_price = df["close"].iloc[i]
+
+            if not (current_price > 0 and np.isfinite(current_price)):
+                continue
 
             if prob_up >= self.confidence_threshold and position == 0:
                 # Buy

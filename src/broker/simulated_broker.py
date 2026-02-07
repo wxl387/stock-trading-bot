@@ -86,7 +86,11 @@ class SimulatedBroker(BaseBroker):
         positions = []
         for symbol, pos_data in self.positions.items():
             if pos_data["quantity"] != 0:
-                current_price = self._get_current_price(symbol)
+                try:
+                    current_price = self._get_current_price(symbol)
+                except ValueError as e:
+                    logger.warning(f"Skipping position {symbol}: {e}")
+                    continue
                 positions.append(self._make_position(symbol, pos_data, current_price))
         return positions
 
@@ -96,7 +100,11 @@ class SimulatedBroker(BaseBroker):
             return None
 
         pos_data = self.positions[symbol]
-        current_price = self._get_current_price(symbol)
+        try:
+            current_price = self._get_current_price(symbol)
+        except ValueError as e:
+            logger.warning(f"Cannot get position {symbol}: {e}")
+            return None
         return self._make_position(symbol, pos_data, current_price)
 
     def place_order(
@@ -333,6 +341,7 @@ class SimulatedBroker(BaseBroker):
             new_quantity = pos["quantity"] + quantity
             pos["avg_cost"] = total_cost / new_quantity if new_quantity > 0 else 0
             pos["quantity"] = new_quantity
+            pos["last_price"] = price
 
             # Deduct cash
             self.cash -= price * quantity
