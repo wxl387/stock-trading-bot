@@ -6,6 +6,8 @@ Claude API client wrapper for intelligent agent analysis.
 
 import logging
 import os
+import shutil
+import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -70,29 +72,43 @@ class LLMClient:
             self._init_client()
 
     def _init_client(self) -> None:
-        """Initialize the Anthropic client."""
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        """Initialize the LLM client (Claude CLI preferred, API key fallback)."""
+        self._use_cli = False
+        self._claude_path = None
 
-        if not api_key:
-            logger.warning(
-                "ANTHROPIC_API_KEY not set. LLM features will be disabled."
+        # Option 1: Claude CLI (uses existing Claude Max subscription — no extra cost)
+        claude_path = shutil.which("claude")
+        if claude_path:
+            self._claude_path = claude_path
+            self._use_cli = True
+            self._client = True  # truthy flag
+            logger.info(
+                f"LLM client initialized via Claude CLI ({claude_path}), model: {self.model}"
             )
-            self.enabled = False
             return
 
-        try:
-            import anthropic
-            self._client = anthropic.Anthropic(api_key=api_key)
-            logger.info(f"LLM client initialized with model: {self.model}")
-        except ImportError:
-            logger.warning(
-                "anthropic package not installed. LLM features will be disabled. "
-                "Install with: pip install anthropic"
-            )
-            self.enabled = False
-        except Exception as e:
-            logger.error(f"Failed to initialize LLM client: {e}")
-            self.enabled = False
+        # Option 2: Anthropic API key
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            try:
+                import anthropic
+                self._client = anthropic.Anthropic(api_key=api_key)
+                logger.info(f"LLM client initialized via API key, model: {self.model}")
+                return
+            except ImportError:
+                logger.warning(
+                    "anthropic package not installed. "
+                    "Install with: pip install anthropic"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize API client: {e}")
+
+        # Neither available
+        logger.warning(
+            "No LLM backend available (no Claude CLI or ANTHROPIC_API_KEY). "
+            "LLM features will be disabled."
+        )
+        self.enabled = False
 
     def _rate_limit(self) -> None:
         """Apply rate limiting between requests."""
@@ -126,6 +142,67 @@ class LLMClient:
 
         self._rate_limit()
 
+        if self._use_cli:
+            return self._generate_cli(prompt, system_prompt)
+        return self._generate_api(prompt, system_prompt, max_tokens, temperature)
+
+    def _generate_cli(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+    ) -> Optional[str]:
+        """Generate response using Claude CLI (uses Claude Max subscription)."""
+        cmd = [
+            self._claude_path, "-p",
+            "--model", self.model,
+            "--output-format", "text",
+            "--tools", "",
+            "--no-session-persistence",
+        ]
+
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                result = subprocess.run(
+                    cmd,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+
+                stderr = result.stderr.strip()
+                if stderr:
+                    logger.warning(f"Claude CLI error: {stderr[:300]}")
+
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    f"Claude CLI timed out (attempt {attempt + 1}/{self.MAX_RETRIES})"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Claude CLI failed (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}"
+                )
+
+            if attempt < self.MAX_RETRIES - 1:
+                time.sleep(self.RETRY_DELAY * (attempt + 1))
+
+        logger.error("Claude CLI request failed after all retries")
+        return None
+
+    def _generate_api(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 2048,
+        temperature: float = 0.7,
+    ) -> Optional[str]:
+        """Generate response using Anthropic API (requires API key)."""
         for attempt in range(self.MAX_RETRIES):
             try:
                 messages = [{"role": "user", "content": prompt}]
@@ -162,7 +239,7 @@ class LLMClient:
                         delay = max(delay, 10)  # Wait longer on rate limit
                     time.sleep(delay)
 
-        logger.error("LLM request failed after all retries")
+        logger.error("LLM API request failed after all retries")
         return None
 
     def analyze_performance(
@@ -998,8 +1075,10 @@ Be specific about components and actions."""
 
     def get_status(self) -> Dict[str, Any]:
         """Get LLM client status."""
+        backend = "cli" if self._use_cli else "api" if self._client else "none"
         return {
             "enabled": self.enabled,
             "available": self.is_available(),
             "model": self.model,
+            "backend": backend,
         }
