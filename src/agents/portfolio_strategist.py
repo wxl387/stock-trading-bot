@@ -552,8 +552,10 @@ class PortfolioStrategistAgent(BaseAgent):
                     end_date=datetime.now()
                 )
 
-                data["returns"] = analytics.get("returns", pd.Series())
-                data["trades"] = analytics.get("trades", pd.DataFrame())
+                returns = analytics.get("returns", pd.Series())
+                data["returns"] = returns.tolist() if hasattr(returns, 'tolist') else returns
+                trades = analytics.get("trades", pd.DataFrame())
+                data["trades"] = trades.to_dict(orient="records") if hasattr(trades, 'to_dict') else trades
                 data["portfolio_metrics"] = analytics.get("portfolio_metrics", {})
                 data["positions"] = analytics.get("positions", {})
 
