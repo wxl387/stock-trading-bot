@@ -291,11 +291,13 @@ class DegradationMonitor:
                 # Calculate returns for Sharpe/win rate
                 if "close" in test_df.columns:
                     returns = test_df["close"].pct_change().dropna()
-                    # Only count returns where we had a long signal
+                    # For sequence models, predictions start at row seq_len
+                    offset = self.sequence_length if model_type != "xgboost" else 0
                     signal_returns = []
                     for i, p in enumerate(prob_up):
-                        if i < len(returns) and p > 0.5:
-                            signal_returns.append(returns.iloc[i] if i < len(returns) else 0)
+                        ret_idx = i + offset
+                        if ret_idx < len(returns) and p > 0.5:
+                            signal_returns.append(returns.iloc[ret_idx])
                     all_returns.extend(signal_returns)
 
             except Exception as e:

@@ -1067,7 +1067,7 @@ portfolio_optimization:
     st.subheader("📈 Optimization Metrics")
 
     # Get trading symbols from config
-    symbols = config.get("symbols", ["AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "TSLA"])
+    symbols = config.get("trading", {}).get("symbols", ["AAPL", "MSFT", "GOOGL", "NVDA", "META", "AMZN", "TSLA"])
 
     # Try to calculate optimization metrics
     try:

@@ -512,8 +512,8 @@ class SymbolManager:
 
         with self._state_lock:
             for symbol in symbols:
-                # Skip if already exists
-                if symbol in self._symbols:
+                # Skip if already active
+                if symbol in self._symbols and self._symbols[symbol].is_active:
                     continue
 
                 entry = SymbolEntry(
