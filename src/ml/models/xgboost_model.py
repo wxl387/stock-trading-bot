@@ -149,6 +149,11 @@ class XGBoostModel:
             Array of prediction probabilities [prob_class_0, prob_class_1].
         """
         self._ensure_trained()
+        # Ensure feature names match training data to avoid XGBoost mismatch errors
+        if self.feature_names and not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X, columns=self.feature_names)
+        elif self.feature_names and isinstance(X, pd.DataFrame) and list(X.columns) != self.feature_names:
+            X = X.reindex(columns=self.feature_names)
         return self.model.predict_proba(X)
 
     def cross_validate(

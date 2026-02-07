@@ -127,6 +127,14 @@ class PortfolioOptimizer:
             PortfolioWeights with optimized allocation
         """
         try:
+            # Ensure method is an enum (handle string callers)
+            if isinstance(method, str):
+                try:
+                    method = OptimizationMethod(method)
+                except ValueError:
+                    logger.warning(f"Unknown method string '{method}'. Using MAX_SHARPE.")
+                    method = OptimizationMethod.MAX_SHARPE
+
             # Fetch historical returns
             returns = self._fetch_returns(symbols)
 
@@ -148,6 +156,7 @@ class PortfolioOptimizer:
             else:
                 logger.warning(f"Unknown method {method}. Using equal-weight.")
                 weights_dict = self.equal_weight_optimize(symbols)
+                method = OptimizationMethod.EQUAL_WEIGHT
 
             # Apply signal tilts if provided
             if signals and len(signals) > 0:
