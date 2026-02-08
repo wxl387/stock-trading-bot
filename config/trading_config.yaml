@@ -35,9 +35,9 @@ risk_management:
   # Stop loss settings
   stop_loss:
     default_type: "atr"           # fixed, atr, or trailing
-    fixed_pct: 0.05               # 5% for fixed stops
-    atr_multiplier: 2.0           # 2x ATR for ATR-based stops
-    trailing_pct: 0.03            # 3% trailing stop
+    fixed_pct: 0.12               # 12% for fixed stops (widened from 5% — tight stops destroy signal alpha)
+    atr_multiplier: 4.0           # 4x ATR for ATR-based stops (widened from 2x)
+    trailing_pct: 0.08            # 8% trailing stop (widened from 3%)
 
   # Take profit settings (with multiple levels for partial exits)
   take_profit:
@@ -77,19 +77,19 @@ risk_management:
     cache_hours: 4                # Hours to cache regime detection
     regime_parameters:
       bull:
-        stop_loss_pct: 0.05
+        stop_loss_pct: 0.12
         position_size_multiplier: 1.0
         min_confidence: 0.50      # Lowered from 0.55
       bear:
-        stop_loss_pct: 0.03
+        stop_loss_pct: 0.08
         position_size_multiplier: 0.7
         min_confidence: 0.55      # Lowered from 0.60
       choppy:
-        stop_loss_pct: 0.02
+        stop_loss_pct: 0.06
         position_size_multiplier: 0.5
         min_confidence: 0.58      # Lowered from 0.70 (was blocking most trades!)
       volatile:
-        stop_loss_pct: 0.08
+        stop_loss_pct: 0.15
         position_size_multiplier: 0.5
         min_confidence: 0.55      # Lowered from 0.65
 
