@@ -262,16 +262,21 @@ class TransformerModel:
         # Build model
         self.model = self.build_model()
 
-        # Callbacks
+        # Callbacks — monitor val_accuracy for classification (val_loss can
+        # increase even as accuracy improves due to calibration overshoot)
+        es_monitor = 'val_accuracy' if validation_data else 'loss'
+        es_mode = 'max' if validation_data else 'min'
         callbacks = [
             EarlyStopping(
-                monitor='val_loss' if validation_data else 'loss',
+                monitor=es_monitor,
+                mode=es_mode,
                 patience=early_stopping_patience,
                 restore_best_weights=True,
                 verbose=1
             ),
             ReduceLROnPlateau(
-                monitor='val_loss' if validation_data else 'loss',
+                monitor=es_monitor,
+                mode=es_mode,
                 factor=0.5,
                 patience=5,
                 min_lr=1e-6,
@@ -518,9 +523,10 @@ class TransformerModel:
                     metrics=['accuracy']
                 )
 
-                # Train with early stopping
+                # Train with early stopping on accuracy
                 early_stop = EarlyStopping(
-                    monitor='val_loss',
+                    monitor='val_accuracy',
+                    mode='max',
                     patience=5,
                     restore_best_weights=True,
                     verbose=0

@@ -121,6 +121,7 @@ def main():
     parser.add_argument("--num-blocks", type=int, default=2, help="Number of transformer blocks")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    parser.add_argument("--period", type=str, default="2y", help="Historical data period (e.g., 2y, 5y, max)")
 
     args = parser.parse_args()
 
@@ -151,6 +152,7 @@ def main():
     logger.info("Preparing sequential data...")
     X_seq, y_seq, feature_cols = prepare_data(
         symbols=symbols,
+        period=args.period,
         sequence_length=args.sequence_length
     )
 
