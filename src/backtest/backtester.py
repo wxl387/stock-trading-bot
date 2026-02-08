@@ -13,7 +13,6 @@ try:
 except ImportError:
     HAS_VBT = False
 
-from sklearn.metrics import accuracy_score
 from src.data.data_fetcher import DataFetcher
 from src.data.feature_engineer import FeatureEngineer
 from src.ml.sequence_utils import create_sequences
@@ -901,7 +900,7 @@ class Backtester:
             Combined BacktestResult across all out-of-sample windows.
         """
         from src.ml.models.xgboost_model import XGBoostModel
-        from src.ml.models.ensemble_model import EnsembleModel, VotingMethod
+        from src.ml.models.ensemble_model import EnsembleModel
 
         # Load optimized params if path provided
         if optimized_params_path:

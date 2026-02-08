@@ -17,6 +17,7 @@ import pandas as pd
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
+from tensorflow.keras.regularizers import l2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -81,13 +82,14 @@ class LSTMModel:
             LSTM(
                 self.lstm_units[0],
                 return_sequences=True,
-                input_shape=(self.sequence_length, self.n_features)
+                input_shape=(self.sequence_length, self.n_features),
+                kernel_regularizer=l2(1e-4)
             ),
             BatchNormalization(),
             Dropout(self.dropout_rate),
 
             # Second LSTM layer
-            LSTM(self.lstm_units[1], return_sequences=False),
+            LSTM(self.lstm_units[1], return_sequences=False, kernel_regularizer=l2(1e-4)),
             BatchNormalization(),
             Dropout(self.dropout_rate),
 

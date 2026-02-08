@@ -319,8 +319,12 @@ class EnsembleModel:
             votes = [1 if p > 0.5 else 0 for p in model_probs.values()]
             prediction = 1 if sum(votes) > len(votes) / 2 else 0
             final_prob = sum(model_probs.values()) / len(model_probs)
+        elif self.voting_method == VotingMethod.SOFT:
+            # Simple average — matches _soft_vote() in predict_proba()
+            final_prob = sum(model_probs.values()) / len(model_probs)
+            prediction = 1 if final_prob > 0.5 else 0
         else:
-            # Soft or weighted voting
+            # Weighted voting
             total_weight = sum(weights_used.values())
             if total_weight == 0:
                 return 0, 0.5, model_probs
