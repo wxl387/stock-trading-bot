@@ -332,8 +332,12 @@ class PortfolioRebalancer:
                     'weight_diff': target_weight - (current_value / portfolio_value if portfolio_value > 0 else 0)
                 })
 
-            # Sort by trade value (largest first)
-            trades.sort(key=lambda x: x['value'], reverse=True)
+            # Sort: SELLs first (free capital), then BUYs (largest first within each)
+            sells = [t for t in trades if t['action'] == 'SELL']
+            buys = [t for t in trades if t['action'] == 'BUY']
+            sells.sort(key=lambda x: x['value'], reverse=True)
+            buys.sort(key=lambda x: x['value'], reverse=True)
+            trades = sells + buys
 
             # Limit number of trades
             if len(trades) > self.max_trades_per_rebalance:

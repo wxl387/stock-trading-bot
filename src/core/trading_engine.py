@@ -527,6 +527,13 @@ class TradingEngine:
                 logger.warning("Skipping signal generation — no ML model loaded")
                 recommendations = []
             else:
+                # Apply regime-aware confidence threshold
+                default_threshold = self.strategy.confidence_threshold
+                if current_regime and self.regime_detector:
+                    regime_params = self.regime_detector.get_regime_parameters(current_regime)
+                    self.strategy.confidence_threshold = regime_params.min_confidence
+                    logger.info(f"Regime {current_regime}: adjusting confidence threshold to {regime_params.min_confidence}")
+
                 recommendations = self.strategy.get_trade_recommendations(
                     symbols=trading_symbols,
                     portfolio_value=account.portfolio_value,
@@ -534,6 +541,9 @@ class TradingEngine:
                     risk_manager=self.risk_manager,
                     target_weights=target_weights  # Pass target weights to strategy
                 )
+
+                # Restore default threshold to avoid side effects
+                self.strategy.confidence_threshold = default_threshold
 
             # Execute trades
             for rec in recommendations:
