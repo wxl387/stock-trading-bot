@@ -88,6 +88,7 @@ class MarketIntelligenceAgent(BaseAgent):
         self._macro_fetcher = None
         self._fundamental_fetcher = None
         self._symbol_manager = None
+        self._finbert_analyzer = None
 
         logger.info(
             f"Market Intelligence agent initialized: "
@@ -153,6 +154,17 @@ class MarketIntelligenceAgent(BaseAgent):
                 logger.error(f"Failed to import SymbolManager: {e}")
         return self._symbol_manager
 
+    @property
+    def finbert_analyzer(self):
+        """Lazy load FinBERT analyzer for scoring news headlines."""
+        if self._finbert_analyzer is None:
+            try:
+                from src.ml.finbert_analyzer import FinBERTAnalyzer
+                self._finbert_analyzer = FinBERTAnalyzer()
+            except Exception as e:
+                logger.warning(f"FinBERT analyzer not available: {e}")
+        return self._finbert_analyzer
+
     def analyze(self) -> List[AgentMessage]:
         """
         Perform analysis and generate observations/suggestions.
@@ -186,7 +198,6 @@ class MarketIntelligenceAgent(BaseAgent):
 
             # Gather news for each symbol
             all_news = []
-            significant_news = []
 
             for symbol in portfolio_symbols:
                 try:
@@ -195,13 +206,29 @@ class MarketIntelligenceAgent(BaseAgent):
                         for item in news_items:
                             item["symbol"] = symbol
                             all_news.append(item)
-
-                            # Check for significant news (high sentiment magnitude)
-                            sentiment = item.get("sentiment_score", 0)
-                            if abs(sentiment) > self.news_significance_threshold:
-                                significant_news.append(item)
                 except Exception as e:
                     logger.warning(f"Failed to fetch news for {symbol}: {e}")
+
+            # Score headlines with FinBERT if available
+            if all_news and self.finbert_analyzer:
+                try:
+                    texts = [
+                        f"{item.get('headline', '')}. {item.get('summary', '')}"
+                        if item.get('summary') else item.get('headline', '')
+                        for item in all_news
+                    ]
+                    scores = self.finbert_analyzer.analyze_batch(texts)
+                    for item, score in zip(all_news, scores):
+                        item["sentiment_score"] = score["sentiment"]
+                    logger.info(f"FinBERT scored {len(all_news)} news items")
+                except Exception as e:
+                    logger.warning(f"FinBERT scoring failed: {e}")
+
+            # Filter for significant news (high sentiment magnitude)
+            significant_news = [
+                item for item in all_news
+                if abs(item.get("sentiment_score", 0)) > self.news_significance_threshold
+            ]
 
             # Check VIX level
             vix_alert = self._check_vix_spike()
