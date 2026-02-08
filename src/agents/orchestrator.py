@@ -7,6 +7,7 @@ Manages agent schedules, message passing, and lifecycle.
 
 import logging
 import threading
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -424,6 +425,16 @@ class AgentOrchestrator:
                 max_instances=1,
             )
 
+            # Daily message queue cleanup at midnight
+            self.scheduler.add_job(
+                self._run_message_cleanup,
+                trigger=CronTrigger(hour=0, minute=0),
+                id="message_cleanup",
+                name="Message Queue Cleanup",
+                replace_existing=True,
+                max_instances=1,
+            )
+
             # Start scheduler
             self.scheduler.start()
             self._is_running = True
@@ -463,73 +474,87 @@ class AgentOrchestrator:
     # Market Intelligence Agent Methods
     # ============================================================
 
+    def _run_with_retry(self, job_name: str, func, agent_role: AgentRole, max_retries: int = 1, retry_delay: int = 60):
+        """Run an agent job with retry on failure.
+
+        Args:
+            job_name: Human-readable job name for logging
+            func: Callable that returns a list of messages
+            agent_role: Agent role for error notification
+            max_retries: Number of retry attempts (default 1)
+            retry_delay: Seconds to wait before retry (default 60)
+        """
+        last_error = None
+        for attempt in range(1 + max_retries):
+            try:
+                messages = func()
+                for msg in messages:
+                    # Use the agent's send_message method
+                    agent = self._get_agent_for_role(agent_role)
+                    if agent:
+                        agent.send_message(msg)
+                logger.info(f"{job_name} complete: {len(messages)} messages generated")
+                return
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(f"{job_name} failed (attempt {attempt + 1}/{1 + max_retries}), "
+                                 f"retrying in {retry_delay}s: {e}")
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(f"{job_name} failed after {1 + max_retries} attempts: {e}")
+                    if self.notifier:
+                        self.notifier.notify_agent_error(
+                            agent_role,
+                            f"{job_name} failed",
+                            str(last_error)
+                        )
+
+    def _get_agent_for_role(self, role: AgentRole):
+        """Return the agent instance for a given role."""
+        role_map = {
+            AgentRole.MARKET_INTELLIGENCE: getattr(self, 'market_intelligence', None),
+            AgentRole.RISK_GUARDIAN: getattr(self, 'risk_guardian', None),
+            AgentRole.PORTFOLIO_STRATEGIST: getattr(self, 'portfolio_strategist', None),
+            AgentRole.OPERATIONS: getattr(self, 'operations', None),
+        }
+        return role_map.get(role)
+
     def _run_news_scan(self) -> None:
         """Run Market Intelligence news scan."""
         logger.info("Running scheduled news scan")
-        try:
-            messages = self.market_intelligence.run_news_scan()
-            for msg in messages:
-                self.market_intelligence.send_message(msg)
-            logger.info(f"News scan complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"News scan failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.MARKET_INTELLIGENCE,
-                    "News scan failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "News scan",
+            self.market_intelligence.run_news_scan,
+            AgentRole.MARKET_INTELLIGENCE
+        )
 
     def _run_earnings_check(self) -> None:
         """Run Market Intelligence earnings check."""
         logger.info("Running scheduled earnings check")
-        try:
-            messages = self.market_intelligence.run_earnings_check()
-            for msg in messages:
-                self.market_intelligence.send_message(msg)
-            logger.info(f"Earnings check complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Earnings check failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.MARKET_INTELLIGENCE,
-                    "Earnings check failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Earnings check",
+            self.market_intelligence.run_earnings_check,
+            AgentRole.MARKET_INTELLIGENCE
+        )
 
     def _run_macro_analysis(self) -> None:
         """Run Market Intelligence macro analysis."""
         logger.info("Running scheduled macro analysis")
-        try:
-            messages = self.market_intelligence.run_macro_analysis()
-            for msg in messages:
-                self.market_intelligence.send_message(msg)
-            logger.info(f"Macro analysis complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Macro analysis failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.MARKET_INTELLIGENCE,
-                    "Macro analysis failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Macro analysis",
+            self.market_intelligence.run_macro_analysis,
+            AgentRole.MARKET_INTELLIGENCE
+        )
 
     def _run_sector_analysis(self) -> None:
         """Run Market Intelligence sector analysis."""
         logger.info("Running scheduled sector analysis")
-        try:
-            messages = self.market_intelligence.run_sector_analysis()
-            for msg in messages:
-                self.market_intelligence.send_message(msg)
-            logger.info(f"Sector analysis complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Sector analysis failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.MARKET_INTELLIGENCE,
-                    "Sector analysis failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Sector analysis",
+            self.market_intelligence.run_sector_analysis,
+            AgentRole.MARKET_INTELLIGENCE
+        )
 
     # ============================================================
     # Risk Guardian Agent Methods
@@ -538,71 +563,38 @@ class AgentOrchestrator:
     def _run_risk_check(self) -> None:
         """Run Risk Guardian risk check."""
         logger.info("Running scheduled risk check")
-        try:
-            messages = self.risk_guardian.run_risk_check()
-            for msg in messages:
-                self.risk_guardian.send_message(msg)
-            logger.info(f"Risk check complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Risk check failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.RISK_GUARDIAN,
-                    "Risk check failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Risk check",
+            self.risk_guardian.run_risk_check,
+            AgentRole.RISK_GUARDIAN
+        )
 
     def _run_drawdown_monitor(self) -> None:
         """Run Risk Guardian drawdown monitor."""
         logger.debug("Running scheduled drawdown monitor")
-        try:
-            messages = self.risk_guardian.run_drawdown_monitor()
-            for msg in messages:
-                self.risk_guardian.send_message(msg)
-            if messages:
-                logger.info(f"Drawdown monitor: {len(messages)} alerts generated")
-        except Exception as e:
-            logger.error(f"Drawdown monitor failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.RISK_GUARDIAN,
-                    "Drawdown monitor failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Drawdown monitor",
+            self.risk_guardian.run_drawdown_monitor,
+            AgentRole.RISK_GUARDIAN
+        )
 
     def _run_correlation_check(self) -> None:
         """Run Risk Guardian correlation check."""
         logger.info("Running scheduled correlation check")
-        try:
-            messages = self.risk_guardian.run_correlation_check()
-            for msg in messages:
-                self.risk_guardian.send_message(msg)
-            logger.info(f"Correlation check complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Correlation check failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.RISK_GUARDIAN,
-                    "Correlation check failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Correlation check",
+            self.risk_guardian.run_correlation_check,
+            AgentRole.RISK_GUARDIAN
+        )
 
     def _run_daily_risk_report(self) -> None:
         """Run Risk Guardian daily risk report."""
         logger.info("Running scheduled daily risk report")
-        try:
-            messages = self.risk_guardian.run_daily_risk_report()
-            for msg in messages:
-                self.risk_guardian.send_message(msg)
-            logger.info(f"Daily risk report complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Daily risk report failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.RISK_GUARDIAN,
-                    "Daily risk report failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Daily risk report",
+            self.risk_guardian.run_daily_risk_report,
+            AgentRole.RISK_GUARDIAN
+        )
 
     # ============================================================
     # Portfolio Strategist Agent Methods
@@ -611,70 +603,38 @@ class AgentOrchestrator:
     def _run_performance_review(self) -> None:
         """Run Portfolio Strategist performance review."""
         logger.info("Running scheduled performance review")
-        try:
-            messages = self.portfolio_strategist.run_performance_review()
-            for msg in messages:
-                self.portfolio_strategist.send_message(msg)
-            logger.info(f"Performance review complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Performance review failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.PORTFOLIO_STRATEGIST,
-                    "Performance review failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Performance review",
+            self.portfolio_strategist.run_performance_review,
+            AgentRole.PORTFOLIO_STRATEGIST
+        )
 
     def _run_rebalancing_check(self) -> None:
         """Run Portfolio Strategist rebalancing check."""
         logger.info("Running scheduled rebalancing check")
-        try:
-            messages = self.portfolio_strategist.run_rebalancing_check()
-            for msg in messages:
-                self.portfolio_strategist.send_message(msg)
-            logger.info(f"Rebalancing check complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Rebalancing check failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.PORTFOLIO_STRATEGIST,
-                    "Rebalancing check failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Rebalancing check",
+            self.portfolio_strategist.run_rebalancing_check,
+            AgentRole.PORTFOLIO_STRATEGIST
+        )
 
     def _run_stock_screening(self) -> None:
         """Run Portfolio Strategist stock screening."""
         logger.info("Running scheduled stock screening")
-        try:
-            messages = self.portfolio_strategist.run_stock_screening()
-            for msg in messages:
-                self.portfolio_strategist.send_message(msg)
-            logger.info(f"Stock screening complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Stock screening failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.PORTFOLIO_STRATEGIST,
-                    "Stock screening failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Stock screening",
+            self.portfolio_strategist.run_stock_screening,
+            AgentRole.PORTFOLIO_STRATEGIST
+        )
 
     def _run_portfolio_review(self) -> None:
         """Run Portfolio Strategist portfolio review."""
         logger.info("Running scheduled portfolio review")
-        try:
-            messages = self.portfolio_strategist.run_portfolio_review()
-            for msg in messages:
-                self.portfolio_strategist.send_message(msg)
-            logger.info(f"Portfolio review complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Portfolio review failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.PORTFOLIO_STRATEGIST,
-                    "Portfolio review failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Portfolio review",
+            self.portfolio_strategist.run_portfolio_review,
+            AgentRole.PORTFOLIO_STRATEGIST
+        )
 
     # ============================================================
     # Operations Agent Methods
@@ -706,53 +666,29 @@ class AgentOrchestrator:
     def _run_execution_quality_check(self) -> None:
         """Run Operations execution quality check."""
         logger.info("Running scheduled execution quality check")
-        try:
-            messages = self.operations.run_execution_quality_check()
-            for msg in messages:
-                self.operations.send_message(msg)
-            logger.info(f"Execution quality check complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Execution quality check failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.OPERATIONS,
-                    "Execution quality check failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Execution quality check",
+            self.operations.run_execution_quality_check,
+            AgentRole.OPERATIONS
+        )
 
     def _run_system_health_check(self) -> None:
         """Run Operations system health check."""
         logger.info("Running scheduled system health check")
-        try:
-            messages = self.operations.run_system_health_check()
-            for msg in messages:
-                self.operations.send_message(msg)
-            logger.info(f"System health check complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"System health check failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.OPERATIONS,
-                    "System health check failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "System health check",
+            self.operations.run_system_health_check,
+            AgentRole.OPERATIONS
+        )
 
     def _run_degradation_check(self) -> None:
         """Run Operations model degradation check."""
         logger.info("Running scheduled degradation check")
-        try:
-            messages = self.operations.run_degradation_check()
-            for msg in messages:
-                self.operations.send_message(msg)
-            logger.info(f"Degradation check complete: {len(messages)} messages generated")
-        except Exception as e:
-            logger.error(f"Degradation check failed: {e}")
-            if self.notifier:
-                self.notifier.notify_agent_error(
-                    AgentRole.OPERATIONS,
-                    "Degradation check failed",
-                    str(e)
-                )
+        self._run_with_retry(
+            "Degradation check",
+            self.operations.run_degradation_check,
+            AgentRole.OPERATIONS
+        )
 
     # ============================================================
     # Manual Trigger Methods
@@ -929,6 +865,15 @@ class AgentOrchestrator:
             reasons.append(f"Operations: {reason}")
 
         return "; ".join(reasons) if reasons else None
+
+    def _run_message_cleanup(self) -> None:
+        """Scheduled daily cleanup of old messages."""
+        try:
+            deleted = self.message_queue.delete_old_messages(days=7)
+            if deleted > 0:
+                logger.info(f"Daily message cleanup: removed {deleted} messages older than 7 days")
+        except Exception as e:
+            logger.error(f"Message cleanup failed: {e}")
 
     def cleanup_old_messages(self, days: int = 30) -> int:
         """

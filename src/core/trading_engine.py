@@ -499,6 +499,13 @@ class TradingEngine:
                                         "price": t_price
                                     })
 
+                                    # Clean up orphaned stop-loss if fully exited
+                                    if t_action == "SELL":
+                                        remaining = self.broker.get_position(t_symbol)
+                                        if not remaining or remaining.quantity <= 0:
+                                            self.risk_manager.remove_stop_loss(t_symbol)
+                                            self.risk_manager.remove_take_profit(t_symbol)
+
                                     # Send notification
                                     if self.notifier:
                                         self.notifier.notify_trade(
@@ -681,6 +688,13 @@ class TradingEngine:
                 quantity=position.quantity,
                 order_type=OrderType.MARKET,
             )
+
+            # Only remove stop-loss/take-profit if order succeeded
+            if order is None or (hasattr(order, 'status') and order.status.value == "rejected"):
+                logger.error(f"Stop-loss order FAILED for {symbol}: order rejected or None. "
+                           f"Position still open — stop-loss retained.")
+                return
+
             self.risk_manager.remove_stop_loss(symbol)
             self.risk_manager.remove_take_profit(symbol)
 

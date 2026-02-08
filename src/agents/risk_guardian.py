@@ -115,6 +115,7 @@ class RiskGuardianAgent(BaseAgent):
         self._daily_loss: float = 0.0
         self._trading_halted: bool = False
         self._last_correlation_matrix: Optional[pd.DataFrame] = None
+        self._consecutive_portfolio_value_failures: int = 0
 
         # Lazy-loaded components
         self._data_aggregator = None
@@ -265,7 +266,25 @@ class RiskGuardianAgent(BaseAgent):
             portfolio_value = self._get_portfolio_value()
 
             if portfolio_value is None:
+                self._consecutive_portfolio_value_failures += 1
+                logger.error(
+                    f"Portfolio value unavailable (consecutive failures: "
+                    f"{self._consecutive_portfolio_value_failures}). "
+                    f"Drawdown monitoring disabled until value is restored."
+                )
+                if self._consecutive_portfolio_value_failures >= 3 and self.notifier:
+                    self.notifier.send_alert(
+                        title="Drawdown Monitor Disabled",
+                        message=(
+                            f"Portfolio value has been unavailable for "
+                            f"{self._consecutive_portfolio_value_failures} consecutive checks. "
+                            f"Drawdown monitoring is effectively disabled."
+                        ),
+                        level="warning"
+                    )
                 return messages
+
+            self._consecutive_portfolio_value_failures = 0
 
             # Update peak value
             if self._peak_portfolio_value is None or portfolio_value > self._peak_portfolio_value:

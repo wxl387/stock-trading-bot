@@ -114,7 +114,7 @@ ml_model:
       xgboost: 1.0                # XGBoost weight
       lstm: 0.8                   # LSTM weight
       cnn: 0.8                    # CNN weight
-      transformer: 0.9            # Transformer weight
+      transformer: 0.3            # Transformer weight (lowered from 0.9 — near-random 49.8% accuracy dilutes signal)
     models:
       xgboost: "trading_model"
       lstm: "lstm_trading_model"

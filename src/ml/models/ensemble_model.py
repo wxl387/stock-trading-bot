@@ -236,7 +236,8 @@ class EnsembleModel:
                 logger.error(f"Transformer prediction error: {e}")
 
         if not all_probas:
-            raise RuntimeError("No model predictions available")
+            logger.error("All model predictions failed — returning neutral prediction [0.5, 0.5]")
+            return np.array([0.5, 0.5])
 
         # Combine based on voting method
         if self.voting_method == VotingMethod.HARD:

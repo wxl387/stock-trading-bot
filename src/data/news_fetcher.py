@@ -79,26 +79,40 @@ class NewsFetcher:
         if cached is not None:
             return cached
 
-        try:
-            if self.provider == "finnhub":
-                articles = self._fetch_finnhub(symbol, last)
-            else:
-                articles = self._fetch_bluesky(symbol, last)
+        max_retries = 2
+        retry_delays = [2, 5]
+        last_error = None
 
-            # Cache results
-            if articles:
-                self._save_cache(symbol, articles)
-                logger.info(f"Fetched {len(articles)} news articles for {symbol} via {self.provider}")
+        for attempt in range(1 + max_retries):
+            try:
+                if self.provider == "finnhub":
+                    articles = self._fetch_finnhub(symbol, last)
+                else:
+                    articles = self._fetch_bluesky(symbol, last)
 
-            time.sleep(self._request_delay)  # Rate limiting
-            return articles
+                # Cache results
+                if articles:
+                    self._save_cache(symbol, articles)
+                    logger.info(f"Fetched {len(articles)} news articles for {symbol} via {self.provider}")
 
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Failed to fetch news for {symbol}: {e}")
-            return []
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Failed to parse news response for {symbol}: {e}")
-            return []
+                time.sleep(self._request_delay)  # Rate limiting
+                return articles
+
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                if attempt < max_retries:
+                    delay = retry_delays[attempt]
+                    logger.warning(f"Failed to fetch news for {symbol} (attempt {attempt + 1}), "
+                                 f"retrying in {delay}s: {e}")
+                    time.sleep(delay)
+                else:
+                    logger.warning(f"Failed to fetch news for {symbol} after {1 + max_retries} attempts: {e}")
+                    return []
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to parse news response for {symbol}: {e}")
+                return []
+
+        return []
 
     def _fetch_finnhub(self, symbol: str, last: int) -> List[Dict]:
         """Fetch news from Finnhub API."""
@@ -201,7 +215,10 @@ class NewsFetcher:
             with open(cache_file, "r") as f:
                 cached = json.load(f)
 
-            cached_time = datetime.fromisoformat(cached.get("timestamp", ""))
+            timestamp_str = cached.get("timestamp")
+            if not timestamp_str:
+                return None
+            cached_time = datetime.fromisoformat(timestamp_str)
             if datetime.now() - cached_time < timedelta(hours=self.cache_hours):
                 logger.debug(f"Using cached news for {symbol}")
                 return cached.get("articles", [])

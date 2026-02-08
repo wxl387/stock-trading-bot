@@ -2,6 +2,7 @@
 Data fetching module for historical and real-time market data.
 """
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict
@@ -62,35 +63,47 @@ class DataFetcher:
                 logger.debug(f"Loading {symbol} from cache")
                 return pd.read_parquet(cache_file)
 
-        # Fetch from Yahoo Finance
+        # Fetch from Yahoo Finance with retry
         logger.info(f"Fetching historical data for {symbol}")
-        try:
-            ticker = yf.Ticker(symbol)
+        max_retries = 2
+        retry_delays = [2, 5]
+        last_error = None
 
-            if start_date:
-                df = ticker.history(start=start_date, end=end_date, interval=interval)
-            else:
-                df = ticker.history(period=period, interval=interval)
+        for attempt in range(1 + max_retries):
+            try:
+                ticker = yf.Ticker(symbol)
 
-            if df.empty:
-                logger.warning(f"No data returned for {symbol}")
-                return pd.DataFrame()
+                if start_date:
+                    df = ticker.history(start=start_date, end=end_date, interval=interval)
+                else:
+                    df = ticker.history(period=period, interval=interval)
 
-            # Standardize column names
-            df = self._standardize_columns(df)
+                if df.empty:
+                    logger.warning(f"No data returned for {symbol}")
+                    return pd.DataFrame()
 
-            # Add symbol column
-            df["symbol"] = symbol
+                # Standardize column names
+                df = self._standardize_columns(df)
 
-            # Cache the data
-            if use_cache:
-                df.to_parquet(cache_file)
+                # Add symbol column
+                df["symbol"] = symbol
 
-            return df
+                # Cache the data
+                if use_cache:
+                    df.to_parquet(cache_file)
 
-        except Exception as e:
-            logger.error(f"Failed to fetch data for {symbol}: {e}")
-            raise
+                return df
+
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    delay = retry_delays[attempt]
+                    logger.warning(f"Failed to fetch data for {symbol} (attempt {attempt + 1}), "
+                                 f"retrying in {delay}s: {e}")
+                    time.sleep(delay)
+                else:
+                    logger.error(f"Failed to fetch data for {symbol} after {1 + max_retries} attempts: {e}")
+                    raise
 
     def fetch_multiple(
         self,
